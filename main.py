@@ -140,6 +140,16 @@ class EVC:
         if self.primary_links is None:
             return False
 
+        # Verify whether the UNI_A is enabled
+        if self.uni_a.interface.switch.enabled is False:
+            log.info(f"UNI A({self.uni_a.interface.switch.id}) is disabled.")
+            return False
+
+        # Verify whether the UNI_Z is enabled
+        if self.uni_z.interface.switch.enabled is False:
+           log.info(f"UNI A({self.uni_a.interface.switch.id}) is disabled.")
+           return False
+
         self._chose_vlans()
 
         # Install NNI flows
