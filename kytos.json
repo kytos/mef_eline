@@ -4,7 +4,7 @@
   "name": "mef_eline",
   "description": "NApp to provision circuits from user request",
   "version": "2.1.0",
-  "napp_dependencies": ["kytos/flow_manager", "kytos/pathfinder"],
+  "napp_dependencies": ["kytos/flow_manager", "kytos/pathfinder", "kytos/storehouse"],
   "license": "MIT",
   "tags": [],
   "url": "https://github.com/kytos/mef_eline.git"
