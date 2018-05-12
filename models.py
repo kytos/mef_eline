@@ -14,10 +14,9 @@ from napps.kytos.mef_eline import settings
 class EVC:
     """Class that represents a E-Line Virtual Connection."""
 
-
     def __init__(self, name, uni_a, uni_z, start_date=None, end_date=None,
-                 bandwidth=None, primary_links=None, backup_links=None,
-                 dynamic_backup_path=None, creation_time=None):
+                 bandwidth=0, primary_links=None, backup_links=None,
+                 dynamic_backup_path=False, creation_time=None):
         """Create an EVC instance with the provided parameters.
 
         Do some basic validations to attributes.
@@ -83,10 +82,12 @@ class EVC:
 
         # Verify if UNIs is valid
         if not uni_a.is_valid():
-            raise ValueError("Invalid uni_a.")
+            tag = uni_a.user_tag.value
+            raise ValueError(f"VLAN tag {tag} is not available on uni_a.")
 
         if not uni_z.is_valid():
-            raise ValueError("Invalid uni_z.")
+            tag = uni_z.user_tag.value
+            raise ValueError(f"VLAN tag {tag} is not available on uni_z.")
 
     def as_dict(self):
         """A dictionary representing an EVC object."""
@@ -106,45 +107,47 @@ class EVC:
             evc_dict['bandwidth'] = self.bandwidth
 
         if self.primary_links:
-            evc_dict['primary_links'] = self.primary_links
+            evc_dict['primary_links'] = [link.as_dict() for link in
+                                         self.primary_links if link]
 
         if self.backup_links:
-            evc_dict['backup_links'] = self.backup_links
+            evc_dict['backup_links'] = [link.as_dict() for link in
+                                        self.backup_links if link]
 
-        if self.primary_links:
+        if self.dynamic_backup_path:
             evc_dict['dynamic_backup_path'] = self.dynamic_backup_path
 
         if self._requested:
             evc_dict['_requested'] = self._requested
 
         if self.current_path:
-           evc_dict['current_path'] = self.current_path
+            evc_dict['current_path'] = self.current_path
 
         if self.primary_path:
-           evc_dict['primary_path'] = self.primary_path
+            evc_dict['primary_path'] = self.primary_path
 
         if self.backup_path:
-           evc_dict['backup_path'] = self.backup_path
+            evc_dict['backup_path'] = self.backup_path
 
         if self.request_time:
-           time = self.request_time.strftime("%Y-%m-%dT%H:%M:%S")
-           evc_dict['request_time'] = time
+            time = self.request_time.strftime("%Y-%m-%dT%H:%M:%S")
+            evc_dict['request_time'] = time
 
         if self.creation_time:
-           time = self.creation_time.strftime("%Y-%m-%dT%H:%M:%S")
-           evc_dict['creation_time'] = time
+            time = self.creation_time.strftime("%Y-%m-%dT%H:%M:%S")
+            evc_dict['creation_time'] = time
 
         if self.owner:
-           evc_dict['owner'] = self.owner
+            evc_dict['owner'] = self.owner
 
         if self.active:
-           evc_dict['active'] = self.active
+            evc_dict['active'] = self.active
 
         if self.enabled:
-           evc_dict['enabled'] = self.enabled
+            evc_dict['enabled'] = self.enabled
 
         if self.priority:
-           evc_dict['priority'] = self.priority
+            evc_dict['priority'] = self.priority
 
         return evc_dict
 
@@ -287,4 +290,4 @@ class EVC:
 
         self.send_flow_mods(self.uni_z.interface.switch, flows_z)
 
-        log.info(f"The circuit {self.id} was deployed.")
+        log.info(f"Deployed EVC id {self.id}, name {self.name}.")
