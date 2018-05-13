@@ -16,14 +16,14 @@ class EVC:
 
     def __init__(self, name, uni_a, uni_z, start_date=None, end_date=None,
                  bandwidth=0, primary_links=None, backup_links=None,
-                 dynamic_backup_path=False, creation_time=None):
+                 dynamic_backup_path=False, creation_time=None, _id=None):
         """Create an EVC instance with the provided parameters.
 
         Do some basic validations to attributes.
         """
         self.validate(name, uni_a, uni_z)
 
-        self._id = uuid4().hex
+        self._id = _id if _id else uuid4().hex
         self.uni_a = uni_a
         self.uni_z = uni_z
         self.name = name
