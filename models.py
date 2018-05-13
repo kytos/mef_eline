@@ -31,8 +31,8 @@ class EVC:
         self.end_date = end_date
         # Bandwidth profile
         self.bandwidth = bandwidth
-        self.primary_links = primary_links
-        self.backup_links = backup_links
+        self.primary_links = primary_links if primary_links else []
+        self.backup_links = backup_links if backup_links else []
         self.dynamic_backup_path = dynamic_backup_path
         # dict with the user original request (input)
         self._requested = {}
@@ -95,59 +95,43 @@ class EVC:
                     "uni_a": self.uni_a.as_dict(),
                     "uni_z": self.uni_z.as_dict()}
 
-        if self.start_date:
-            date = self.start_date.strftime("%Y-%m-%dT%H:%M:%S")
-            evc_dict["start_date"] = date
+        time_fmt = "%Y-%m-%dT%H:%M:%S"
 
-        if self.end_date:
-            date = self.end_date.strftime("%Y-%m-%dT%H:%M:%S")
-            evc_dict['end_date'] = date
+        date = self.start_date.strftime(time_fmt)
+        evc_dict["start_date"] = date
 
-        if self.bandwidth:
-            evc_dict['bandwidth'] = self.bandwidth
+        date = self.end_date
+        if date:
+            date = self.end_date.strftime(time_fmt)
+        evc_dict['end_date'] = date
 
-        if self.primary_links:
-            evc_dict['primary_links'] = [link.as_dict() for link in
-                                         self.primary_links if link]
+        evc_dict['bandwidth'] = self.bandwidth
 
-        if self.backup_links:
-            evc_dict['backup_links'] = [link.as_dict() for link in
-                                        self.backup_links if link]
+        evc_dict['primary_links'] = [link.as_dict() for link in
+                                     self.primary_links if link]
 
-        if self.dynamic_backup_path:
-            evc_dict['dynamic_backup_path'] = self.dynamic_backup_path
+        evc_dict['backup_links'] = [link.as_dict() for link in
+                                    self.backup_links if link]
+
+        evc_dict['dynamic_backup_path'] = self.dynamic_backup_path
 
         if self._requested:
             evc_dict['_requested'] = self._requested
 
-        if self.current_path:
-            evc_dict['current_path'] = self.current_path
+        evc_dict['current_path'] = self.current_path
+        evc_dict['primary_path'] = self.primary_path
+        evc_dict['backup_path'] = self.backup_path
 
-        if self.primary_path:
-            evc_dict['primary_path'] = self.primary_path
+        time = self.request_time.strftime(time_fmt)
+        evc_dict['request_time'] = time
 
-        if self.backup_path:
-            evc_dict['backup_path'] = self.backup_path
+        time = self.creation_time.strftime(time_fmt)
+        evc_dict['creation_time'] = time
 
-        if self.request_time:
-            time = self.request_time.strftime("%Y-%m-%dT%H:%M:%S")
-            evc_dict['request_time'] = time
-
-        if self.creation_time:
-            time = self.creation_time.strftime("%Y-%m-%dT%H:%M:%S")
-            evc_dict['creation_time'] = time
-
-        if self.owner:
-            evc_dict['owner'] = self.owner
-
-        if self.active:
-            evc_dict['active'] = self.active
-
-        if self.enabled:
-            evc_dict['enabled'] = self.enabled
-
-        if self.priority:
-            evc_dict['priority'] = self.priority
+        evc_dict['owner'] = self.owner
+        evc_dict['active'] = self.active
+        evc_dict['enabled'] = self.enabled
+        evc_dict['priority'] = self.priority
 
         return evc_dict
 
