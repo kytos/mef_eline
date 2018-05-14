@@ -5,18 +5,20 @@ NApp to provision circuits from user request.
 from datetime import datetime
 from datetime import timezone
 import json
-
 import requests
+import time
 from flask import jsonify, request
 
 from kytos.core.events import KytosEvent
 from kytos.core import KytosNApp, log, rest
 from kytos.core.interface import TAG, UNI
+from kytos.core.helpers import listen_to
 from kytos.core.link import Link
 from napps.kytos.mef_eline import settings
 from napps.kytos.mef_eline.schedule import Schedule
 
 from napps.kytos.mef_eline.models import EVC
+
 
 class Main(KytosNApp):
     """Main class of amlight/mef_eline NApp.
@@ -33,7 +35,12 @@ class Main(KytosNApp):
         So, if you have any setup routine, insert it here.
         """
         self.store_items = {}
-        self.verify_storehouse('circuits')
+        self.namespace = settings.NAMESPACE
+        self.namespace_evcs = self.namespace.split('.')[-1]  # 'circuits' str
+        self.box_id = None
+        self.pending_evcs = []  # it'll be used for evcs that have failed.
+        self.load_callback_executed = True  # to retrieve data synchronously
+        self._bootstrap_box()
 
         self.execute_as_loop(1)
         self.schedule = Schedule()
@@ -44,7 +51,7 @@ class Main(KytosNApp):
         You can also use this method in loop mode if you add to the above setup
         method a line like the following example:
 
-            self.execute_as_loop(30)  # 30-second interval.
+        self.execute_as_loop(30)  # 30-second interval.
         """
         self.schedule.run_pending()
 
@@ -53,6 +60,7 @@ class Main(KytosNApp):
 
         If you have some cleanup procedure, insert it here.
         """
+        log.info('Shutting down kytos/mef_eline.')
         pass
 
     @staticmethod
@@ -138,6 +146,7 @@ class Main(KytosNApp):
         interface_id = requested_uni.get("interface_id")
         interface = self._find_interface_by_id(interface_id)
         if interface is None:
+            log.debug('interface is None')
             return False
 
         tag = self._get_tag_from_request(requested_uni.get("tag"))
@@ -154,15 +163,22 @@ class Main(KytosNApp):
 
     @rest('/v2/evc/', methods=['GET'])
     def list_circuits(self):
-        """Rest endpoint to display all circuit informations."""
-        circuits = self.store_items.get('circuits').data
+        """Rest endpoint to display all circuit information."""
+        self._load_box()
+        circuits = self.store_items.get(self.namespace_evcs, {})
+        if circuits:
+            return jsonify(circuits.data), 200
         return jsonify(circuits), 200
 
     @rest('/v2/evc/<circuit_id>', methods=['GET'])
     def get_circuit(self, circuit_id):
-        """Rest endpoint to display a specific circuit informations."""
-        circuits = self.store_items.get('circuits').data
-        return jsonify(circuits.get(circuit_id,{})), 200
+        """Rest endpoint to display a specific circuit information."""
+        self._load_box()
+        circuits = self.store_items.get(self.namespace_evcs, {})
+        if circuits.data:
+            if circuits.data.get(circuit_id):
+                return jsonify(circuits.data.get(circuit_id)), 200
+        return jsonify({'response': f'circuit_id {circuit_id} not found'}), 400
 
     @rest('/v2/evc/', methods=['POST'])
     def create_circuit(self):
@@ -187,112 +203,177 @@ class Main(KytosNApp):
         E-Line NApp generates an event to notify all Kytos NApps of a new EVC
         creation
 
-        Finnaly, notify user of the status of its request.
+        Finally, notify user of the status of its request.
         """
-        # Try to create the circuit object
-        data = request.get_json()
-
-        name = data.get('name', None)
-        uni_a = self._get_uni_from_request(data.get('uni_a'))
-        uni_z = self._get_uni_from_request(data.get('uni_z'))
-        start_date = data.get('start_date', None)
-        end_date = data.get('end_date', None)
-        creation_time = data.get('creation_time', None)
-
         try:
-            circuit = EVC(name, uni_a, uni_z, start_date=start_date,
-                          end_date=end_date, creation_time=creation_time)
-        except ValueError as exception:
+            # Try to create the circuit object
+            data = request.get_json()
+            for uni in ['uni_a', 'uni_z']:
+                data[uni] = self._get_uni_from_request(data.get(uni))
+            circuit = EVC(**data, mef_eline=self)
+            if circuit:
+                self._save_evc(circuit)
+                self._schedule_circuit(circuit)
+        except (AttributeError, ValueError) as exception:
             return jsonify("Bad request: {}".format(exception)), 400
-
-        # Request paths to Pathfinder
-        circuit.primary_links = self.get_best_path(circuit)
-
-        # Schedule the circuit deploy
-        self.schedule.circuit_deploy(circuit)
-
-        # Save evc
-        self.save_evc(circuit)
-
-        # Notify users
         return jsonify({"circuit_id": circuit.id}), 201
 
-    def verify_storehouse(self, entities):
-        """Request a list of box saved by specific entity."""
+    @listen_to('.*kytos/of_core.handshake.completed')
+    def handle_handshake(self, event):
+        """Listen to switches handshake to trigger EVCs (re)provisioning.
+
+        """
+        # In practice, it takes a few seconds before we can send flowmods.
+        # Once we have retries on EVC scheduler funcs, get rid of this sleep.
+        time.sleep(5)
+        self.schedule_all_circuits()
+
+    def _bootstrap_box(self):
+        """Bootstrap a box for mef_eline.namespace.
+
+        To bootstrap, a list of boxes of this namespace will be
+        requested. Then, if a box exists, it'll be loaded. Otherwise,
+        a new box will be created.
+
+        """
         name = 'kytos.storehouse.list'
-        content = {'namespace': f'kytos.mef_eline.{entities}',
-                   'callback': self.request_retrieve_entities}
+        content = {'namespace': self.namespace,
+                   'callback': self._bootstrap_box_callback}
         event = KytosEvent(name=name, content=content)
         self.controller.buffers.app.put(event)
-        log.info(f'verify data in storehouse for {entities}.')
+        log.info(f'Bootstraping storehouse box for {self.namespace}.')
 
-    def request_retrieve_entities(self, event, data, error):
-        """Retrieve the stored box or create a new box."""
-        msg = ''
-        content = {'namespace': event.content.get('namespace'),
-                   'callback': self.load_from_store,
+    def _bootstrap_box_callback(self, event, box, error):
+        """Callback of _bootstrap_box."""
+        if len(box) == 0:
+            self._create_box()
+        else:
+            self.box_id = box[0]
+        log.debug(f'box_id {self.box_id}')
+        self._load_box()
+
+    def _load_box(self, sync=True):
+        """Load the data retrieved from storehouse.
+
+        Args:
+            sync (bool): True to retrieve synchronously
+        """
+        content = {'namespace': self.namespace,
+                   'callback': self._load_box_callback,
                    'data': {}}
-
-        if len(data) == 0:
-            name = 'kytos.storehouse.create'
-            msg = 'Create new box in storehouse'
-        else:
-            name = 'kytos.storehouse.retrieve'
-            content['box_id'] = data[0]
-            msg = 'Retrieve data from storeohouse.'
+        name = 'kytos.storehouse.retrieve'
+        content['box_id'] = self.box_id
+        msg = 'Retrieving data from storehouse.'
 
         event = KytosEvent(name=name, content=content)
         self.controller.buffers.app.put(event)
-        log.debug(msg)
 
-    def load_from_store(self, event, box, error):
-        """Save the data retrived from storehouse."""
-        entities = event.content.get('namespace', '').split('.')[-1]
+        if sync:
+            self.load_callback_executed = False
+            while not self.load_callback_executed:
+                time.sleep(0.1)
+
+    def _load_box_callback(self, event, box, error):
+        """Callback of _load_box."""
         if error:
-            log.error('Error while get a box from storehouse.')
+            log.error(f'Box {box.box_id} not found in {box.namespace}.')
         else:
-            self.store_items[entities] = box
-            log.info('Data updated')
+            self.store_items[self.namespace_evcs] = box
+            log.debug(f'Box {box.box_id} loaded from {box.namespace}.')
+        self.load_callback_executed = True
 
-    def schedule_all_stored_circuits(self):
-        """Schedule all stored circuits"""
-        store = self.store_items.get('circuits')
+    def _create_box(self):
+        """Create store box for mef_eline self.namespace."""
+        content = {'namespace': self.namespace,
+                   'callback': self._create_box_callback,
+                   'data': {}}
+        name = 'kytos.storehouse.create'
+        msg = 'Creating new box in storehouse'
+        event = KytosEvent(name=name, content=content)
+        self.controller.buffers.app.put(event)
 
-        for data in store.data.values():
-            # get the evc attributes
-            name = data.get('name', None)
-            uni_a = self._get_uni_from_request(data.get('uni_a'))
-            uni_z = self._get_uni_from_request(data.get('uni_z'))
-            start_date = data.get('start_date', None)
-            end_date = data.get('end_date', None)
-            creation_time = data.get('creation_time', None)
+    def _create_box_callback(self, event, box, error):
+        """Callback of _create_box."""
+        if error:
+            log.error(f'Box {box.box_id} not created in {box.namespace}.')
+        else:
+            self.box_id = box.box_id
+            log.info(f'Box {box.box_id} was created in {box.namespace}.')
 
-            # we no need try catch , because the data is already validated
-            circuit = EVC(name, uni_a, uni_z, start_date=start_date,
-                          end_date=end_date, creation_time=creation_time)
+    def _schedule_circuit(self, circuit, sched_func='circuit_enable',
+                          **kwargs):
+        """Schedule a function generically for a specific circuit.
 
-            # schedule a circuit deploy event if the event is not deployed yet
-            self.schedule.circuit_deploy(circuit, execute_elapsed_time=False)
-            log.info(f'{circuit.id} loadded.')
+        Args:
+            circuit (EVC): mef_eline.models.EVC object.
+            sched_func (str): mef_eline.schedule.Schedule's function to be run.
+            kwargs (dict): kwargs of sched_func.
+        """
+        res = getattr(self.schedule, sched_func)(circuit, **kwargs)
+        return res
 
-    def save_evc(self, circuit):
-        """Save the circuit."""
-        store = self.store_items.get('circuits')
-        store.data[circuit.id] = circuit.as_dict()
+    def schedule_all_circuits(self, sched_func='circuit_enable', **kwargs):
+        """Schedule a function generically for all circuits.
 
+        Args:
+            sched_func (str): mef_eline.schedule.Schedule's function to be run
+            kwargs (dict): kwargs of sched_func.
+        """
+        store = self.store_items.get(self.namespace_evcs)
+        func = getattr(self.schedule, sched_func)
+
+        if store and func:
+            for data in store.data.values():
+                try:
+                    evc_dict = {
+                        'name': data['name'],
+                        'uni_a': data['uni_a'],
+                        'uni_z': data['uni_z'],
+                        'start_date': data['start_date'],
+                        'end_date': data['end_date'],
+                        'bandwidth': data['bandwidth'],
+                        'primary_links': data['primary_links'],
+                        'backup_links': data['backup_links'],
+                        'dynamic_backup_path': data['dynamic_backup_path'],
+                        'creation_time': data['creation_time'],
+                        '_id': data['id'],
+                        'enabled': data['enabled'],
+                        'active': data['active'],
+                        'owner': data['owner'],
+                        'priority': data['priority'],
+                        'mef_eline': self
+                    }
+                    circuit = EVC(**evc_dict)
+                    log.debug(circuit.__dict__)
+                    if circuit:
+                        self._save_evc(circuit)
+                        # 'func' should update storehouse with mef_eline obj
+                        # in order to update the actual status of the EVC
+                        func(circuit=circuit, **kwargs)
+                except (ValueError, TypeError):
+                    pass  # issu-e #25
+
+    def _save_evc(self, circuit):
+        """Save the circuit async."""
+        store = self.store_items.get(self.namespace_evcs)
         name = 'kytos.storehouse.update'
-        content = {'namespace': 'kytos.mef_eline.circuits',
+        content = {'namespace': self.namespace,
                    'box_id': store.box_id,
-                   'data': store.data,
-                   'callback': self.update_instance}
+                   'data': {circuit.id: circuit.as_dict()},
+                   'method': 'PATCH',
+                   'callback': self._save_evc_callback,
+                   'evc': circuit}
 
         event = KytosEvent(name=name, content=content)
         self.controller.buffers.app.put(event)
+        log.debug(f"{event!r}")
 
-    def update_instance(self, event, data, error):
-        """Display in Kytos console if the data was updated."""
-        entities = event.content.get('namespace', '').split('.')[-1]
+    def _save_evc_callback(self, event, box, error):
+        """Callback of _save_evc."""
+        evc = event.content['evc']
+        evc_id = evc.id
+        evc_name = evc.name
         if error:
-            log.error(f'Error trying to update storehouse {entities}.')
+            log.error(f"Couldn't save {evc!r}.")
         else:
-            log.debug(f'Storehouse update to entities: {entities}.')
+            log.info(f'Saved {evc!r}.')
