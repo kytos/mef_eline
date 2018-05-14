@@ -14,15 +14,19 @@ from napps.kytos.mef_eline import settings
 class EVC:
     """Class that represents a E-Line Virtual Connection."""
 
-    def __init__(self, name, uni_a, uni_z, start_date=None, end_date=None,
+    def __init__(self, name=None, uni_a=None, uni_z=None,
+                 start_date=None, end_date=None,
                  bandwidth=0, primary_links=None, backup_links=None,
-                 dynamic_backup_path=False, creation_time=None, _id=None):
+                 dynamic_backup_path=False, creation_time=None, _id=None,
+                 enabled=False, active=False, owner=None, priority=0,
+                 mef_eline=None):
         """Create an EVC instance with the provided parameters.
 
         Do some basic validations to attributes.
         """
         self.validate(name, uni_a, uni_z)
 
+        self.mef_eline = mef_eline  # obj association to compute/store
         self._id = _id if _id else uuid4().hex
         self.uni_a = uni_a
         self.uni_z = uni_z
@@ -97,30 +101,28 @@ class EVC:
 
         time_fmt = "%Y-%m-%dT%H:%M:%S"
 
-        date = self.start_date.strftime(time_fmt)
-        evc_dict["start_date"] = date
+        def link_as_dict(links):
+            """Return list comprehension of links as_dict."""
+            return [link.as_dict() for link in links if link]
 
-        date = self.end_date
-        if date:
-            date = self.end_date.strftime(time_fmt)
-        evc_dict['end_date'] = date
+        evc_dict["start_date"] = self.start_date
+        if isinstance(self.start_date, datetime):
+            evc_dict["start_date"] = self.start_date.strftime(time_fmt)
+
+        evc_dict["end_date"] = self.end_date
+        if isinstance(self.end_date, datetime):
+            evc_dict["end_date"] = self.end_date.strftime(time_fmt)
 
         evc_dict['bandwidth'] = self.bandwidth
-
-        evc_dict['primary_links'] = [link.as_dict() for link in
-                                     self.primary_links if link]
-
-        evc_dict['backup_links'] = [link.as_dict() for link in
-                                    self.backup_links if link]
-
+        evc_dict['primary_links'] = link_as_dict(self.primary_links)
+        evc_dict['backup_links'] = link_as_dict(self.backup_links)
+        evc_dict['current_path'] = link_as_dict(self.current_path)
+        evc_dict['primary_path'] = link_as_dict(self.primary_path)
+        evc_dict['backup_path'] = link_as_dict(self.backup_path)
         evc_dict['dynamic_backup_path'] = self.dynamic_backup_path
 
         if self._requested:
             evc_dict['_requested'] = self._requested
-
-        evc_dict['current_path'] = self.current_path
-        evc_dict['primary_path'] = self.primary_path
-        evc_dict['backup_path'] = self.backup_path
 
         time = self.request_time.strftime(time_fmt)
         evc_dict['request_time'] = time
@@ -139,23 +141,59 @@ class EVC:
         """Json representation for the EVC object."""
         return json.dumps(self.as_dict())
 
+    def __repr__(self):
+        """EVC repr."""
+        return f"EVC({self.id}, {self.name})"
+
     @property
     def id(self):  # pylint: disable=invalid-name
         """Return this EVC's ID."""
         return self._id
 
-    def create(self):
-        pass
+    def enable(self):
+        """Enable the EVC.
 
-    def discover_new_path(self):
-        pass
+        The path is computed by pathfinder with the self.mef_eline
+        object.
+        """
+        if not self.enabled:
+            self.compute_primary_path()
+            if self.deploy():
+                self.enabled = True
+                # update store house
+                if self.mef_eline:
+                    self.mef_eline._save_evc(self)
+                return True
+        else:
+            log.error(f'{self!r} is already enabled.')
+        return False
+
+    def compute_primary_path(self):
+        """Compute primary_path.
+
+        Currently, only the lowest cost path is computed without
+        links constraints/filters.
+        """
+        # Request paths to pathfinder
+        self.primary_links = self.mef_eline.get_best_path(self)
+        self.primary_path = self.primary_links
+        self.current_path = self.primary_path
+
+    def compute_backup_path(self):
+        """Compute backup_path.
+
+        If the backup path is supposed to be dynamic, alternatives
+        paths should also be computed.
+        """
+        raise NotImplementedError()
 
     def change_path(self, path):
         pass
 
     def reprovision(self):
-        """Force the EVC (re-)provisioning"""
-        pass
+        """Force the EVC reprovisioning."""
+        self.enabled = False
+        return self.enable()
 
     def remove(self):
         pass
@@ -210,8 +248,8 @@ class EVC:
 
     def deploy(self):
         """Install the flows for this circuit."""
-        if self.primary_links is None:
-            log.info("Primary links are empty.")
+        if not self.primary_links:
+            log.error("Primary links are empty.")
             return False
 
         self._chose_vlans()
@@ -273,5 +311,6 @@ class EVC:
                                              out_vlan_z, in_vlan_z, pop=True))
 
         self.send_flow_mods(self.uni_z.interface.switch, flows_z)
-
-        log.info(f"Deployed EVC id {self.id}, name {self.name}.")
+        self.active = True  # it should also be updated with PortStats/Flowmods
+        log.info(f"Deployed {self!r}.")
+        return True
