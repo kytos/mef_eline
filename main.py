@@ -4,10 +4,12 @@ NApp to provision circuits from user request.
 """
 from datetime import datetime
 from datetime import timezone
+import json
 
 import requests
 from flask import jsonify, request
 
+from kytos.core.events import KytosEvent
 from kytos.core import KytosNApp, log, rest
 from kytos.core.interface import TAG, UNI
 from kytos.core.link import Link
@@ -30,6 +32,9 @@ class Main(KytosNApp):
 
         So, if you have any setup routine, insert it here.
         """
+        self.store_items = {}
+        self.verify_storehouse('circuits')
+
         self.execute_as_loop(1)
         self.schedule = Schedule()
 
@@ -147,14 +152,17 @@ class Main(KytosNApp):
 
         return uni
 
-    # New methods
     @rest('/v2/evc/', methods=['GET'])
     def list_circuits(self):
-        pass
+        """Rest endpoint to display all circuit informations."""
+        circuits = self.store_items.get('circuits').data
+        return jsonify(circuits), 200
 
     @rest('/v2/evc/<circuit_id>', methods=['GET'])
     def get_circuit(self, circuit_id):
-        pass
+        """Rest endpoint to display a specific circuit informations."""
+        circuits = self.store_items.get('circuits').data
+        return jsonify(circuits.get(circuit_id,{})), 200
 
     @rest('/v2/evc/', methods=['POST'])
     def create_circuit(self):
@@ -184,14 +192,17 @@ class Main(KytosNApp):
         # Try to create the circuit object
         data = request.get_json()
 
-        name = data.get('name')
+        name = data.get('name', None)
         uni_a = self._get_uni_from_request(data.get('uni_a'))
         uni_z = self._get_uni_from_request(data.get('uni_z'))
-        creation_time =  self._get_time_from_data(data.get('creation_time'))
+        start_date = data.get('start_date', None)
+        end_date = data.get('end_date', None)
+        creation_time = data.get('creation_time', None)
 
         try:
-            circuit = EVC(uni_a, uni_z, name, creation_time=creation_time)
-        except TypeError as exception:
+            circuit = EVC(name, uni_a, uni_z, start_date=start_date,
+                          end_date=end_date, creation_time=creation_time)
+        except ValueError as exception:
             return jsonify("Bad request: {}".format(exception)), 400
 
         # Request paths to Pathfinder
@@ -200,38 +211,88 @@ class Main(KytosNApp):
         # Schedule the circuit deploy
         self.schedule.circuit_deploy(circuit)
 
-        # Notify users
+        # Save evc
+        self.save_evc(circuit)
 
+        # Notify users
         return jsonify({"circuit_id": circuit.id}), 201
 
-    def _get_time_from_data(self, data=None):
-        """Receive a dictionary or a string and return a datatime instance.
+    def verify_storehouse(self, entities):
+        """Request a list of box saved by specific entity."""
+        name = 'kytos.storehouse.list'
+        content = {'namespace': f'kytos.mef_eline.{entities}',
+                   'callback': self.request_retrieve_entities}
+        event = KytosEvent(name=name, content=content)
+        self.controller.buffers.app.put(event)
+        log.info(f'verify data in storehouse for {entities}.')
 
-           data = {
-                 "year": 2006,
-                 "month": 11,
-                 "day": 21,
-                 "hour": 16,
-                 "minute": 30 ,
-                 "second": 00
-           }
+    def request_retrieve_entities(self, event, data, error):
+        """Retrieve the stored box or create a new box."""
+        msg = ''
+        content = {'namespace': event.content.get('namespace'),
+                   'callback': self.load_from_store,
+                   'data': {}}
 
-           or
-
-           data = "21/11/06 16:30:00"
-
-           2018-04-17T17:13:50Z
-
-        Args:
-            data (str, dict): python dict or string to be converted to datetime
-
-        Returns:
-            datetime: datetime instance.
-        """
-        if isinstance(data, str):
-            date =  datetime.strptime(data, "%Y-%m-%dT%H:%M:%S")
-        elif (isinstance(data, dict)):
-            date = datetime(**data)
+        if len(data) == 0:
+            name = 'kytos.storehouse.create'
+            msg = 'Create new box in storehouse'
         else:
-            return None
-        return date.replace(tzinfo=timezone.utc)
+            name = 'kytos.storehouse.retrieve'
+            content['box_id'] = data[0]
+            msg = 'Retrieve data from storeohouse.'
+
+        event = KytosEvent(name=name, content=content)
+        self.controller.buffers.app.put(event)
+        log.debug(msg)
+
+    def load_from_store(self, event, box, error):
+        """Save the data retrived from storehouse."""
+        entities = event.content.get('namespace', '').split('.')[-1]
+        if error:
+            log.error('Error while get a box from storehouse.')
+        else:
+            self.store_items[entities] = box
+            log.info('Data updated')
+
+    def schedule_all_stored_circuits(self):
+        """Schedule all stored circuits"""
+        store = self.store_items.get('circuits')
+
+        for data in store.data.values():
+            # get the evc attributes
+            name = data.get('name', None)
+            uni_a = self._get_uni_from_request(data.get('uni_a'))
+            uni_z = self._get_uni_from_request(data.get('uni_z'))
+            start_date = data.get('start_date', None)
+            end_date = data.get('end_date', None)
+            creation_time = data.get('creation_time', None)
+
+            # we no need try catch , because the data is already validated
+            circuit = EVC(name, uni_a, uni_z, start_date=start_date,
+                          end_date=end_date, creation_time=creation_time)
+
+            # schedule a circuit deploy event if the event is not deployed yet
+            self.schedule.circuit_deploy(circuit, execute_elapsed_time=False)
+            log.info(f'{circuit.id} loadded.')
+
+    def save_evc(self, circuit):
+        """Save the circuit."""
+        store = self.store_items.get('circuits')
+        store.data[circuit.id] = circuit.as_dict()
+
+        name = 'kytos.storehouse.update'
+        content = {'namespace': 'kytos.mef_eline.circuits',
+                   'box_id': store.box_id,
+                   'data': store.data,
+                   'callback': self.update_instance}
+
+        event = KytosEvent(name=name, content=content)
+        self.controller.buffers.app.put(event)
+
+    def update_instance(self, event, data, error):
+        """Display in Kytos console if the data was updated."""
+        entities = event.content.get('namespace', '').split('.')[-1]
+        if error:
+            log.error(f'Error trying to update storehouse {entities}.')
+        else:
+            log.debug(f'Storehouse update to entities: {entities}.')

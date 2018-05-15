@@ -1,33 +1,28 @@
 """Classes used in the main application."""
 from uuid import uuid4
 
+import json
 import requests
+from datetime import datetime
+
 from kytos.core import log
-from kytos.core.helpers import now
-from kytos.core.interface import UNI
+from kytos.core.helpers import now, get_time
+from kytos.core.interface import UNI, TAG
 from napps.kytos.mef_eline import settings
 
 
 class EVC:
     """Class that represents a E-Line Virtual Connection."""
 
-    def __init__(self, uni_a, uni_z, name, start_date=None, end_date=None,
+
+    def __init__(self, name, uni_a, uni_z, start_date=None, end_date=None,
                  bandwidth=None, primary_links=None, backup_links=None,
                  dynamic_backup_path=None, creation_time=None):
         """Create an EVC instance with the provided parameters.
 
         Do some basic validations to attributes.
         """
-
-        if uni_a is None or uni_z is None or name is None:
-            raise TypeError("Invalid arguments")
-
-        if ((not isinstance(uni_a, UNI)) or
-                (not isinstance(uni_z, UNI))):
-            raise TypeError("Invalid UNI")
-
-        if not uni_a.is_valid() or not uni_z.is_valid():
-            raise TypeError("Invalid UNI")
+        self.validate(name, uni_a, uni_z)
 
         self._id = uuid4().hex
         self.uni_a = uni_a
@@ -41,20 +36,20 @@ class EVC:
         self.backup_links = backup_links
         self.dynamic_backup_path = dynamic_backup_path
         # dict with the user original request (input)
-        self._requested = None
+        self._requested = {}
         # circuit being used at the moment if this is an active circuit
-        self.current_path = None
+        self.current_path = []
         # primary circuit offered to user IF one or more links were provided in
         # the request
-        self.primary_path = None
+        self.primary_path = []
         # backup circuit offered to the user IF one or more links were provided
         # in the request
-        self.backup_path = None
+        self.backup_path = []
         # datetime of user request for a EVC (or datetime when object was
         # created)
         self.request_time = now()
         # datetime when the circuit should be activated. now() || schedule()
-        self.creation_time =  creation_time or now()
+        self.creation_time = get_time(creation_time) or now()
         self.owner = None
         # Operational State
         self.active = False
@@ -62,7 +57,105 @@ class EVC:
         self.enabled = False
         # Service level provided in the request. "Gold", "Silver", ...
         self.priority = 0
-        # (...) everything else from request must be @property
+
+    def validate(self, name=None, uni_a=None, uni_z=None):
+        """Validate the EVC arguments.
+
+        Raises:
+            ValueError: raised when object attributes are invalid.
+        """
+        # Verify required attributes
+        if name is None:
+            raise ValueError("name is required.")
+
+        if uni_a is None:
+            raise ValueError("uni_a is required")
+
+        if uni_z is None:
+            raise ValueError('uni_z is required')
+
+        # Verify UNIs instances
+        if not isinstance(uni_a, UNI):
+            raise ValueError("Invalid uni_a.")
+
+        if not isinstance(uni_z, UNI):
+            raise ValueError("Invalid uni_z.")
+
+        # Verify if UNIs is valid
+        if not uni_a.is_valid():
+            raise ValueError("Invalid uni_a.")
+
+        if not uni_z.is_valid():
+            raise ValueError("Invalid uni_z.")
+
+    def as_dict(self):
+        """A dictionary representing an EVC object."""
+        evc_dict = {"id": self.id, "name": self.name,
+                    "uni_a": self.uni_a.as_dict(),
+                    "uni_z": self.uni_z.as_dict()}
+
+        if self.start_date:
+            date = self.start_date.strftime("%Y-%m-%dT%H:%M:%S")
+            evc_dict["start_date"] = date
+
+        if self.end_date:
+            date = self.end_date.strftime("%Y-%m-%dT%H:%M:%S")
+            evc_dict['end_date'] = date
+
+        if self.bandwidth:
+            evc_dict['bandwidth'] = self.bandwidth
+
+        if self.primary_links:
+            evc_dict['primary_links'] = self.primary_links
+
+        if self.backup_links:
+            evc_dict['backup_links'] = self.backup_links
+
+        if self.primary_links:
+            evc_dict['dynamic_backup_path'] = self.dynamic_backup_path
+
+        if self._requested:
+            evc_dict['_requested'] = self._requested
+
+        if self.current_path:
+           evc_dict['current_path'] = self.current_path
+
+        if self.primary_path:
+           evc_dict['primary_path'] = self.primary_path
+
+        if self.backup_path:
+           evc_dict['backup_path'] = self.backup_path
+
+        if self.request_time:
+           time = self.request_time.strftime("%Y-%m-%dT%H:%M:%S")
+           evc_dict['request_time'] = time
+
+        if self.creation_time:
+           time = self.creation_time.strftime("%Y-%m-%dT%H:%M:%S")
+           evc_dict['creation_time'] = time
+
+        if self.owner:
+           evc_dict['owner'] = self.owner
+
+        if self.active:
+           evc_dict['active'] = self.active
+
+        if self.enabled:
+           evc_dict['enabled'] = self.enabled
+
+        if self.priority:
+           evc_dict['priority'] = self.priority
+
+        return evc_dict
+
+    def as_json(self):
+        """Json representation for the EVC object."""
+        return json.dumps(self.as_dict())
+
+    @property
+    def id(self):  # pylint: disable=invalid-name
+        """Return this EVC's ID."""
+        return self._id
 
     def create(self):
         pass
@@ -72,17 +165,13 @@ class EVC:
 
     def change_path(self, path):
         pass
+
     def reprovision(self):
         """Force the EVC (re-)provisioning"""
         pass
 
     def remove(self):
         pass
-
-    @property
-    def id(self):  # pylint: disable=invalid-name
-        """Return this EVC's ID."""
-        return self._id
 
     @staticmethod
     def send_flow_mods(switch, flow_mods):
