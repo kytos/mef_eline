@@ -2,19 +2,20 @@
 
 NApp to provision circuits from user request.
 """
-from datetime import datetime
-from datetime import timezone
+import time
 
 import requests
 from flask import jsonify, request
 
 from kytos.core import KytosNApp, log, rest
+from kytos.core.events import KytosEvent
+from kytos.core.helpers import listen_to
 from kytos.core.interface import TAG, UNI
 from kytos.core.link import Link
 from napps.kytos.mef_eline import settings
+from napps.kytos.mef_eline.models import EVC
 from napps.kytos.mef_eline.schedule import Schedule
 
-from napps.kytos.mef_eline.models import EVC
 
 class Main(KytosNApp):
     """Main class of amlight/mef_eline NApp.
@@ -32,6 +33,9 @@ class Main(KytosNApp):
         """
         self.execute_as_loop(1)
         self.schedule = Schedule()
+        self.namespace = 'kytos.mef_eline.circuits'
+        self.box = None
+        self.list_stored_boxes()
 
     def execute(self):
         """This method is executed right after the setup method execution.
@@ -112,49 +116,23 @@ class Main(KytosNApp):
 
         return interface
 
-    @staticmethod
-    def _get_tag_from_request(requested_tag):
-        """Return a tag object from a json request.
-
-        If there is no tag inside the request, return None
-        """
-        if requested_tag is None:
-            return None
-        try:
-            return TAG(requested_tag.get("tag_type"),
-                       requested_tag.get("value"))
-        except AttributeError:
-            return False
-
-    def _get_uni_from_request(self, requested_uni):
-        if requested_uni is None:
-            return False
-
-        interface_id = requested_uni.get("interface_id")
-        interface = self._find_interface_by_id(interface_id)
-        if interface is None:
-            return False
-
-        tag = self._get_tag_from_request(requested_uni.get("tag"))
-
-        if tag is False:
-            return False
-
-        try:
-            uni = UNI(interface, tag)
-        except TypeError:
-            return False
-
-        return uni
-
-    # New methods
     @rest('/v2/evc/', methods=['GET'])
     def list_circuits(self):
-        pass
+        """Endpoint to return all circuits stored."""
+        return jsonify(self.box.data), 200
 
     @rest('/v2/evc/<circuit_id>', methods=['GET'])
     def get_circuit(self, circuit_id):
-        pass
+        """Endpoint to return a circuit based on id."""
+        circuits = self.box.data
+        if circuit_id in circuits:
+            result = circuits[circuit_id]
+            status = 200
+        else:
+            result = {'response': f'circuit_id {circuit_id} not found'}
+            status = 400
+
+        return jsonify(result), status
 
     @rest('/v2/evc/', methods=['POST'])
     def create_circuit(self):
@@ -184,54 +162,151 @@ class Main(KytosNApp):
         # Try to create the circuit object
         data = request.get_json()
 
-        name = data.get('name')
-        uni_a = self._get_uni_from_request(data.get('uni_a'))
-        uni_z = self._get_uni_from_request(data.get('uni_z'))
-        creation_time =  self._get_time_from_data(data.get('creation_time'))
-
         try:
-            circuit = EVC(uni_a, uni_z, name, creation_time=creation_time)
-        except TypeError as exception:
+            evc = self.evc_from_dict(data)
+        except ValueError as exception:
             return jsonify("Bad request: {}".format(exception)), 400
 
+        # save circuit
+        self.save_evc(evc)
+
         # Request paths to Pathfinder
-        circuit.primary_links = self.get_best_path(circuit)
+        evc.primary_links = self.get_best_path(evc)
 
         # Schedule the circuit deploy
-        self.schedule.circuit_deploy(circuit)
+        self.schedule.circuit_deploy(evc)
 
         # Notify users
 
-        return jsonify({"circuit_id": circuit.id}), 201
+        return jsonify({"circuit_id": evc.id}), 201
 
-    def _get_time_from_data(self, data=None):
-        """Receive a dictionary or a string and return a datatime instance.
 
-           data = {
-                 "year": 2006,
-                 "month": 11,
-                 "day": 21,
-                 "hour": 16,
-                 "minute": 30 ,
-                 "second": 00
-           }
+    # METHODS TO HANDLE STOREHOUSE
+    def create_box(self):
+        """Create a new box."""
+        content = {'namespace': self.namespace,
+                   'callback': self._create_box_callback,
+                   'data': {}}
+        event = KytosEvent(name='kytos.storehouse.create', content=content)
+        self.controller.buffers.app.put(event)
+        log.info('Create box from storehouse.')
 
-           or
+    def _create_box_callback(self, event, data, error):
+        """Callback to handle create_box."""
+        if error:
+            log.error(f'Can\'t create box with namespace {self.namespace}')
 
-           data = "21/11/06 16:30:00"
+        self.box = data
+        log.info(f'Box {self.box.box_id} was created in {self.namespace}.')
 
-           2018-04-17T17:13:50Z
+    def list_stored_boxes(self):
+        """List all boxes using the current namespace."""
+        name = 'kytos.storehouse.list'
+        content = {'namespace': self.namespace,
+                   'callback': self._get_or_create_a_box_from_list_of_boxes}
 
-        Args:
-            data (str, dict): python dict or string to be converted to datetime
+        event = KytosEvent(name=name, content=content)
+        self.controller.buffers.app.put(event)
+        log.info(f'Bootstraping storehouse box for {self.namespace}.')
 
-        Returns:
-            datetime: datetime instance.
-        """
-        if isinstance(data, str):
-            date =  datetime.strptime(data, "%Y-%m-%dT%H:%M:%S")
-        elif (isinstance(data, dict)):
-            date = datetime(**data)
+    def _get_or_create_a_box_from_list_of_boxes(self, event, data, error):
+        """Create a new box or retrieve the stored box."""
+        if len(data) == 0:
+            self.create_box()
         else:
-            return None
-        return date.replace(tzinfo=timezone.utc)
+            self.get_stored_box(data[0])
+
+    def get_stored_box(self, box_id):
+        """Get box from storehouse"""
+        content = {'namespace': self.namespace,
+                   'callback': self._get_box_callback,
+                   'box_id': box_id,
+                   'data': {}}
+        name = 'kytos.storehouse.retrieve'
+        event = KytosEvent(name=name, content=content)
+        self.controller.buffers.app.put(event)
+        log.info(f'Retrieve box with {box_id} from {self.namespace}.')
+
+    def _get_box_callback(self, event, data, error):
+        """Handle get_box method saving the box or logging with the error."""
+        if error:
+            log.error(f'Box {data.box_id} not found in {data.namespace}.')
+
+        self.box = data
+        log.info(f'Box {self.box.box_id} was load from storehouse.')
+
+    def save_evc(self, evc):
+        """Save a EVC using the storehouse."""
+        self.box.data[evc.id] = evc.as_dict()
+
+        content = {'namespace': self.namespace,
+                   'box_id': self.box.box_id,
+                   'data': self.box.data,
+                   'callback': self._save_evc_callback}
+
+        event = KytosEvent(name='kytos.storehouse.update', content=content)
+        self.controller.buffers.app.put(event)
+
+    def _save_evc_callback(self, event, data, error):
+        """Callback to handle save EVC."""
+        if error:
+            log.error(f'Can\'t update the {self.box.box_id}')
+
+        log.info(f'Box {data.box_id} was updated.')
+
+    @listen_to('kytos/topology.updated')
+    def trigger_evc_reprovisioning(self, event):
+        """Listen to topology update to trigger EVCs (re)provisioning.
+
+        Schedule all Circuits with valid UNIs.
+        """
+        for data in self.box.data.values():
+            try:
+                evc = self.evc_from_dict(data)
+                self.schedule.circuit_deploy(evc)
+            except ValueError as exception:
+                log.debug(f'{data.get("id")} can not be provisioning yet.')
+
+    def evc_from_dict(self, evc_dict):
+        """Convert some dict values to instance of EVC classes.
+
+        This method will convert: [UNI, Link]
+        """
+        data = evc_dict.copy()  # Do not modify the original dict
+
+        for attribute, value in data.items():
+
+            if 'uni' in attribute:
+                data[attribute] = self.uni_from_dict(value)
+
+            if ('path' in attribute or 'link' in attribute) and \
+               ('dynamic_backup_path' != attribute):
+                if len(value) != 0:
+                    link = Link(value.get('endpoint_a'),
+                                value.get('endpoint_b'))
+                    link.extend_metadata(value.get('metadata'))
+                    data[attribute] = link
+
+        return EVC(**data)
+
+    def uni_from_dict(self, uni_dict):
+        if uni_dict is None:
+            return False
+
+        interface_id = uni_dict.get("interface_id")
+
+        interface = self._find_interface_by_id(interface_id)
+        if interface is None:
+            return False
+
+        tag = TAG.from_dict(uni_dict.get("tag"))
+
+        if tag is False:
+            return False
+
+        try:
+            uni = UNI(interface, tag)
+        except TypeError:
+            return False
+
+        return uni
