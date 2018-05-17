@@ -2,9 +2,6 @@
 
 NApp to provision circuits from user request.
 """
-from datetime import datetime
-from datetime import timezone
-
 import requests
 from flask import jsonify, request
 
@@ -131,6 +128,7 @@ class Main(KytosNApp):
             return False
 
         interface_id = requested_uni.get("interface_id")
+
         interface = self._find_interface_by_id(interface_id)
         if interface is None:
             return False
@@ -184,14 +182,13 @@ class Main(KytosNApp):
         # Try to create the circuit object
         data = request.get_json()
 
-        name = data.get('name')
-        uni_a = self._get_uni_from_request(data.get('uni_a'))
-        uni_z = self._get_uni_from_request(data.get('uni_z'))
-        creation_time =  self._get_time_from_data(data.get('creation_time'))
+        # fix UNI from request
+        for uni in ['uni_a','uni_z']:
+            data[uni] = self._get_uni_from_request(data.get(uni))
 
         try:
-            circuit = EVC(uni_a, uni_z, name, creation_time=creation_time)
-        except TypeError as exception:
+            circuit = EVC(**data)
+        except ValueError as exception:
             return jsonify("Bad request: {}".format(exception)), 400
 
         # Request paths to Pathfinder
@@ -203,35 +200,3 @@ class Main(KytosNApp):
         # Notify users
 
         return jsonify({"circuit_id": circuit.id}), 201
-
-    def _get_time_from_data(self, data=None):
-        """Receive a dictionary or a string and return a datatime instance.
-
-           data = {
-                 "year": 2006,
-                 "month": 11,
-                 "day": 21,
-                 "hour": 16,
-                 "minute": 30 ,
-                 "second": 00
-           }
-
-           or
-
-           data = "21/11/06 16:30:00"
-
-           2018-04-17T17:13:50Z
-
-        Args:
-            data (str, dict): python dict or string to be converted to datetime
-
-        Returns:
-            datetime: datetime instance.
-        """
-        if isinstance(data, str):
-            date =  datetime.strptime(data, "%Y-%m-%dT%H:%M:%S")
-        elif (isinstance(data, dict)):
-            date = datetime(**data)
-        else:
-            return None
-        return date.replace(tzinfo=timezone.utc)

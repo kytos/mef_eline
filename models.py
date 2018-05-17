@@ -2,8 +2,9 @@
 from uuid import uuid4
 
 import requests
+from datetime import datetime
 from kytos.core import log
-from kytos.core.helpers import now
+from kytos.core.helpers import now, get_time
 from kytos.core.interface import UNI
 from napps.kytos.mef_eline import settings
 
@@ -11,58 +12,95 @@ from napps.kytos.mef_eline import settings
 class EVC:
     """Class that represents a E-Line Virtual Connection."""
 
-    def __init__(self, uni_a, uni_z, name, start_date=None, end_date=None,
-                 bandwidth=None, primary_links=None, backup_links=None,
-                 dynamic_backup_path=None, creation_time=None):
+    def __init__(self, **kwargs):
         """Create an EVC instance with the provided parameters.
 
-        Do some basic validations to attributes.
+        Args:
+            id(str): EVC identifier. Whether it's None an ID will be genereted.
+            name: represents an EVC name.(Required)
+            uni_a (UNI): Endpoint A for User Network Interface.(Required)
+            uni_z (UNI): Endpoint Z for User Network Interface.(Required)
+            start_date(datetime|str): Date when the EVC was registred.
+                                      Default is now().
+            end_date(datetime|str): Final date that the EVC will be fineshed.
+                                    Default is None.
+            bandwidth(int): Bandwidth used by EVC instance. Default is 0.
+            primary_links(list): Primary links used by evc. Default is []
+            backup_links(list): Backups links used by evc. Default is []
+            dynamic_backup_path(bool): Enable computer backup path dynamically.
+                                       Dafault is False.
+            creation_time(datetime|str): datetime when the circuit should be
+                                         activated. default is now().
+            enabled(Boolean): attribute to indicate the operational state.
+                              default is False.
+            active(Boolean): attribute to Administrative state;
+                             default is False.
+            owner(str): The EVC owner. Default is None.
+            priority(int): Service level provided in the request. Default is 0.
+
+        Raises:
+            ValueError: raised when object attributes are invalid.
         """
+        self._validate(**kwargs)
 
-        if uni_a is None or uni_z is None or name is None:
-            raise TypeError("Invalid arguments")
+        # required attributes
+        self._id = kwargs.get('id', uuid4().hex)
+        self.uni_a = kwargs.get('uni_a')
+        self.uni_z = kwargs.get('uni_z')
+        self.name = kwargs.get('name')
 
-        if ((not isinstance(uni_a, UNI)) or
-                (not isinstance(uni_z, UNI))):
-            raise TypeError("Invalid UNI")
+        # optional attributes
+        self.start_date = get_time(kwargs.get('start_date')) or now()
+        self.end_date = get_time(kwargs.get('end_date')) or None
 
-        if not uni_a.is_valid() or not uni_z.is_valid():
-            raise TypeError("Invalid UNI")
+        self.bandwidth = kwargs.get('bandwidth', 0)
+        self.primary_links = kwargs.get('primary_links', [])
+        self.backup_links =  kwargs.get('backup_links', [])
+        self.dynamic_backup_path = kwargs.get('dynamic_backup_path', False)
+        self.creation_time = get_time(kwargs.get('creation_time')) or  now()
+        self.owner = kwargs.get('owner', None)
+        self.active = kwargs.get('active', False)
+        self.enabled = kwargs.get('enabled', False)
+        self.priority = kwargs.get('priority', 0)
 
-        self._id = uuid4().hex
-        self.uni_a = uni_a
-        self.uni_z = uni_z
-        self.name = name
-        self.start_date = start_date if start_date else now()
-        self.end_date = end_date
-        # Bandwidth profile
-        self.bandwidth = bandwidth
-        self.primary_links = primary_links
-        self.backup_links = backup_links
-        self.dynamic_backup_path = dynamic_backup_path
-        # dict with the user original request (input)
-        self._requested = None
-        # circuit being used at the moment if this is an active circuit
-        self.current_path = None
-        # primary circuit offered to user IF one or more links were provided in
-        # the request
-        self.primary_path = None
-        # backup circuit offered to the user IF one or more links were provided
-        # in the request
-        self.backup_path = None
         # datetime of user request for a EVC (or datetime when object was
         # created)
         self.request_time = now()
-        # datetime when the circuit should be activated. now() || schedule()
-        self.creation_time =  creation_time or now()
-        self.owner = None
-        # Operational State
-        self.active = False
-        # Administrative State
-        self.enabled = False
-        # Service level provided in the request. "Gold", "Silver", ...
-        self.priority = 0
-        # (...) everything else from request must be @property
+        # dict with the user original request (input)
+        self._requested = kwargs
+
+        # internal paths attribute
+        self.current_path = []
+        self.primary_path = []
+        self.backup_path = []
+
+    def _validate(self, **kwargs):
+        """Do Basic validations.
+
+        Verify required attributes: name, uni_a, uni_z
+        Verify if the attributes uni_a and uni_z are valid.
+
+        Raises:
+            ValueError: message with error detail.
+
+        """
+        required_attributes = ['name', 'uni_a', 'uni_z']
+
+        for attribute in required_attributes:
+
+            if attribute not in kwargs:
+                raise ValueError(f'{attribute} is required.')
+
+            if 'uni' in attribute:
+                uni = kwargs.get(attribute)
+
+                if not isinstance(uni, UNI):
+                    raise ValueError(f'{attribute} is an invalid UNI.')
+
+                elif not uni.is_valid():
+                    tag = uni_a.user_tag.value
+                    message = f'VLAN tag {tag} is not available in {attribute}'
+                    raise ValueError(message)
 
     def create(self):
         pass
