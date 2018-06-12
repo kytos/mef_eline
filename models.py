@@ -6,10 +6,11 @@ from datetime import datetime
 from kytos.core import log
 from kytos.core.helpers import now, get_time
 from kytos.core.interface import UNI
+from kytos.core.common import GenericEntity, EntityStatus
 from napps.kytos.mef_eline import settings
 
 
-class EVC:
+class EVC(GenericEntity):
     """Class that represents a E-Line Virtual Connection."""
 
     def __init__(self, **kwargs):
@@ -81,6 +82,30 @@ class EVC:
     def __repr__(self):
         """Repr method."""
         return f"EVC({self._id}, {self.name})"
+
+    @property
+    def enabled(self):
+        """Override the enabled method.
+
+        We consider a EVC enabled whether all the current path are enabled.
+
+        Returns:
+            boolean: True if the links are enabled, othewrise False.
+
+        """
+        return all([link.enabled for link in self.current_path])
+
+    @property
+    def active(self):
+        """Override the active method to consider the Links.
+
+        Consider the EVC active whether all Links in the circuit are active.
+
+        Returns:
+            boolean: True whether all links are active, otherwise False.
+
+        """
+        return all([link.active for link in self.current_path])
 
     def _validate(self, **kwargs):
         """Do Basic validations.
@@ -237,7 +262,15 @@ class EVC:
                    self.primary_links[1:])
 
     def deploy(self):
-        """Install the flows for this circuit."""
+        """Install the flows for this circuit.
+
+
+        This method will send flows whether the circuit is EntityStatus.UP
+        """
+
+        if self.status != EntityStatus.UP:
+            return False
+
         if self.primary_links is None:
             log.info("Primary links are empty.")
             return False
@@ -302,5 +335,4 @@ class EVC:
 
         self.send_flow_mods(self.uni_z.interface.switch, flows_z)
 
-        self.active = True
         log.info(f"{self} was deployed.")
