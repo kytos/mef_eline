@@ -13,6 +13,8 @@ from napps.kytos.mef_eline import settings
 class EVC(GenericEntity):
     """Class that represents a E-Line Virtual Connection."""
 
+    unique_attributes = ['name', 'uni_a', 'uni_z']
+
     def __init__(self, **kwargs):
         """Create an EVC instance with the provided parameters.
 
@@ -88,6 +90,24 @@ class EVC(GenericEntity):
         # dict with the user original request (input)
         self._requested = kwargs
 
+    def update(self, *args, **kwargs):
+        """Update evc attributes.
+
+        This method will raises an error trying to change the following
+        attributes: [name, uni_a and uni_z]
+
+        Raises:
+            ValueError: message with error detail.
+
+        """
+        for attribute, value in kwargs.items():
+            if attribute in self.unique_attributes:
+                raise ValueError(f'{attribute} can\'t be be updated.')
+            if hasattr(self, attribute):
+                setattr(self, attribute, value)
+            else:
+                raise ValueError(f'The attribute "{attribute}" is invalid.')
+
     def __repr__(self):
         """Repr method."""
         return f"EVC({self._id}, {self.name})"
@@ -102,9 +122,8 @@ class EVC(GenericEntity):
             ValueError: message with error detail.
 
         """
-        required_attributes = ['name', 'uni_a', 'uni_z']
 
-        for attribute in required_attributes:
+        for attribute in self.unique_attributes:
 
             if attribute not in kwargs:
                 raise ValueError(f'{attribute} is required.')
@@ -116,7 +135,7 @@ class EVC(GenericEntity):
                     raise ValueError(f'{attribute} is an invalid UNI.')
 
                 elif not uni.is_valid():
-                    tag = uni_a.user_tag.value
+                    tag = uni.user_tag.value
                     message = f'VLAN tag {tag} is not available in {attribute}'
                     raise ValueError(message)
 
@@ -186,6 +205,7 @@ class EVC(GenericEntity):
 
     def change_path(self, path):
         pass
+
     def reprovision(self):
         """Force the EVC (re-)provisioning"""
         pass

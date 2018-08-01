@@ -172,6 +172,31 @@ class Main(KytosNApp):
 
         return jsonify({"circuit_id": evc.id}), 201
 
+    @rest('/v2/evc/<circuit_id>', methods=['PATCH'])
+    def update(self, circuit_id):
+        """Update a circuit based on payload.
+
+        The EVC required attributes can't be updated.
+        """
+        data = request.get_json()
+        circuits = self.box.data if self.box else {}
+
+        if circuit_id not in circuits:
+            result = {'response': f'circuit_id {circuit_id} not found'}
+            return jsonify(result), 404
+
+        try:
+            evc = self.evc_from_dict(circuits.get(circuit_id))
+            evc.update(**data)
+            self.save_evc(evc)
+            result = {evc.id: evc.as_dict()}
+            status = 200
+        except ValueError as exception:
+            result = "Bad request: {}".format(exception)
+            status = 400
+
+        return jsonify(result), status
+
     def is_duplicated_evc(self, evc):
         """Verify if the circuit given is duplicated with the stored evcs.
 
