@@ -13,6 +13,8 @@ from napps.kytos.mef_eline import settings
 class EVC(GenericEntity):
     """Class that represents a E-Line Virtual Connection."""
 
+    unique_attributes = ['name', 'uni_a', 'uni_z']
+
     def __init__(self, **kwargs):
         """Create an EVC instance with the provided parameters.
 
@@ -60,6 +62,7 @@ class EVC(GenericEntity):
         # optional attributes
         self.start_date = get_time(kwargs.get('start_date')) or now()
         self.end_date = get_time(kwargs.get('end_date')) or None
+        self.deploy_frequency = kwargs.get('deploy_frequency')
 
         self.bandwidth = kwargs.get('bandwidth', 0)
         self.primary_links = kwargs.get('primary_links', [])
@@ -71,6 +74,7 @@ class EVC(GenericEntity):
         self.creation_time = get_time(kwargs.get('creation_time')) or  now()
         self.owner = kwargs.get('owner', None)
         self.priority = kwargs.get('priority', 0)
+        self.circuit_schedule = kwargs.get('circuit_schedule', [])
 
         if kwargs.get('active', False):
             self.activate()
@@ -88,6 +92,24 @@ class EVC(GenericEntity):
         # dict with the user original request (input)
         self._requested = kwargs
 
+    def update(self, *args, **kwargs):
+        """Update evc attributes.
+
+        This method will raises an error trying to change the following
+        attributes: [name, uni_a and uni_z]
+
+        Raises:
+            ValueError: message with error detail.
+
+        """
+        for attribute, value in kwargs.items():
+            if attribute in self.unique_attributes:
+                raise ValueError(f'{attribute} can\'t be be updated.')
+            if hasattr(self, attribute):
+                setattr(self, attribute, value)
+            else:
+                raise ValueError(f'The attribute "{attribute}" is invalid.')
+
     def __repr__(self):
         """Repr method."""
         return f"EVC({self._id}, {self.name})"
@@ -102,9 +124,8 @@ class EVC(GenericEntity):
             ValueError: message with error detail.
 
         """
-        required_attributes = ['name', 'uni_a', 'uni_z']
 
-        for attribute in required_attributes:
+        for attribute in self.unique_attributes:
 
             if attribute not in kwargs:
                 raise ValueError(f'{attribute} is required.')
@@ -116,7 +137,7 @@ class EVC(GenericEntity):
                     raise ValueError(f'{attribute} is an invalid UNI.')
 
                 elif not uni.is_valid():
-                    tag = uni_a.user_tag.value
+                    tag = uni.user_tag.value
                     message = f'VLAN tag {tag} is not available in {attribute}'
                     raise ValueError(message)
 
@@ -172,6 +193,7 @@ class EVC(GenericEntity):
         evc_dict['creation_time'] = time
 
         evc_dict['owner'] = self.owner
+        evc_dict['circuit_rules'] = self.circuit_rules
         evc_dict['active'] = self.is_active()
         evc_dict['enabled'] = self.is_enabled()
         evc_dict['priority'] = self.priority
@@ -186,6 +208,7 @@ class EVC(GenericEntity):
 
     def change_path(self, path):
         pass
+
     def reprovision(self):
         """Force the EVC (re-)provisioning"""
         pass
@@ -246,11 +269,26 @@ class EVC(GenericEntity):
         return zip(self.primary_links[:-1],
                    self.primary_links[1:])
 
+    def should_deploy(self):
+        """This method will verify if the circuit should be deployed."""
+        if self.primary_links is None:
+            log.debug("Primary links are empty.")
+            return False
+
+        if not circuit.is_enabled():
+            log.debug(f'{circuit} is disabled.')
+            return False
+
+        if not circuit.is_active():
+            log.debug(f'{circuit} will be deployed.')
+            return True
+
+        return False
+
     def deploy(self):
         """Install the flows for this circuit."""
-        if self.primary_links is None:
-            log.info("Primary links are empty.")
-            return False
+        if not self.should_deploy():
+            return
 
         self._chose_vlans()
 

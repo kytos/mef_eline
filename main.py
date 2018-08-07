@@ -14,7 +14,7 @@ from kytos.core.interface import TAG, UNI
 from kytos.core.link import Link
 from napps.kytos.mef_eline import settings
 from napps.kytos.mef_eline.models import EVC
-from napps.kytos.mef_eline.schedule import Schedule
+from napps.kytos.mef_eline.scheduler import Scheduler, CircuitSchedule
 
 
 class Main(KytosNApp):
@@ -31,8 +31,7 @@ class Main(KytosNApp):
 
         So, if you have any setup routine, insert it here.
         """
-        self.execute_as_loop(1)
-        self.schedule = Schedule()
+        self.sched = Scheduler()
         self.namespace = 'kytos.mef_eline.circuits'
         self.box = None
         self.list_stored_boxes()
@@ -45,7 +44,7 @@ class Main(KytosNApp):
 
             self.execute_as_loop(30)  # 30-second interval.
         """
-        self.schedule.run_pending()
+        pass
 
     def shutdown(self):
         """This method is executed when your napp is unloaded.
@@ -163,7 +162,7 @@ class Main(KytosNApp):
         evc.primary_links = self.get_best_path(evc) or []
 
         # Schedule the circuit deploy
-        self.schedule.circuit_deploy(evc)
+        self.sched.add(evc)
 
         # Notify users
         event = KytosEvent(name='kytos.mef_eline.created',
@@ -171,6 +170,31 @@ class Main(KytosNApp):
         self.controller.buffers.app.put(event)
 
         return jsonify({"circuit_id": evc.id}), 201
+
+    @rest('/v2/evc/<circuit_id>', methods=['PATCH'])
+    def update(self, circuit_id):
+        """Update a circuit based on payload.
+
+        The EVC required attributes can't be updated.
+        """
+        data = request.get_json()
+        circuits = self.box.data if self.box else {}
+
+        if circuit_id not in circuits:
+            result = {'response': f'circuit_id {circuit_id} not found'}
+            return jsonify(result), 404
+
+        try:
+            evc = self.evc_from_dict(circuits.get(circuit_id))
+            evc.update(**data)
+            self.save_evc(evc)
+            result = {evc.id: evc.as_dict()}
+            status = 200
+        except ValueError as exception:
+            result = "Bad request: {}".format(exception)
+            status = 400
+
+        return jsonify(result), status
 
     def is_duplicated_evc(self, evc):
         """Verify if the circuit given is duplicated with the stored evcs.
@@ -275,7 +299,7 @@ class Main(KytosNApp):
         for data in stored_data:
             try:
                 evc = self.evc_from_dict(data)
-                self.schedule.circuit_deploy(evc)
+                self.sched.add(evc)
             except ValueError as exception:
                 log.debug(f'{data.get("id")} can not be provisioning yet.')
 
@@ -290,6 +314,11 @@ class Main(KytosNApp):
 
             if 'uni' in attribute:
                 data[attribute] = self.uni_from_dict(value)
+
+            if 'circuit_schedule' == attribute:
+                data[attribute] = []
+                for schedule in value:
+                    data[attribute].append(CircuitSchedule.from_dict(schedule))
 
             if ('path' in attribute or 'link' in attribute) and \
                ('dynamic_backup_path' != attribute):
