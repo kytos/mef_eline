@@ -2,9 +2,6 @@
 
 NApp to provision circuits from user request.
 """
-import time
-
-import requests
 from flask import jsonify, request
 
 from kytos.core import KytosNApp, log, rest
@@ -12,9 +9,9 @@ from kytos.core.events import KytosEvent
 from kytos.core.helpers import listen_to
 from kytos.core.interface import TAG, UNI
 from kytos.core.link import Link
-from napps.kytos.mef_eline import settings
-from napps.kytos.mef_eline.models import EVC
-from napps.kytos.mef_eline.schedule import Schedule
+from napps.kytos.mef_eline.models import EVC, DynamicPathManager
+from napps.kytos.mef_eline.scheduler import CircuitSchedule, Scheduler
+from napps.kytos.mef_eline.storehouse import StoreHouse
 
 
 class Main(KytosNApp):
@@ -31,84 +28,39 @@ class Main(KytosNApp):
 
         So, if you have any setup routine, insert it here.
         """
-        self.execute_as_loop(1)
-        self.schedule = Schedule()
-        self.namespace = 'kytos.mef_eline.circuits'
-        self.box = None
-        self.list_stored_boxes()
+        # object used to scheduler circuit events
+        self.sched = Scheduler()
+
+        # object to save and load circuits
+        self.storehouse = StoreHouse(self.controller)
+
+        # set the controller that will manager the dynamic paths
+        DynamicPathManager.set_controller(self.controller)
 
     def execute(self):
-        """This method is executed right after the setup method execution.
-
-        You can also use this method in loop mode if you add to the above setup
-        method a line like the following example:
-
-            self.execute_as_loop(30)  # 30-second interval.
-        """
-        self.schedule.run_pending()
+        """Execute once when the napp is running."""
+        pass
 
     def shutdown(self):
-        """This method is executed when your napp is unloaded.
+        """Execute when your napp is unloaded.
 
         If you have some cleanup procedure, insert it here.
         """
         pass
 
-    @staticmethod
-    def _clear_path(path):
-        """Remove switches from a path, returning only interfaeces."""
-        return [endpoint for endpoint in path if len(endpoint) > 23]
-
-    @staticmethod
-    def get_paths(circuit):
-        """Get a valid path for the circuit from the Pathfinder."""
-        endpoint = settings.PATHFINDER_URL
-        request_data = {"source": circuit.uni_a.interface.id,
-                        "destination": circuit.uni_z.interface.id}
-        api_reply = requests.post(endpoint, json=request_data)
-        if api_reply.status_code != requests.codes.ok:
-            log.error("Failed to get paths at %s. Returned %s",
-                      endpoint, api_reply.status_code)
-            return None
-        reply_data = api_reply.json()
-        return reply_data.get('paths')
-
-    def get_best_path(self, circuit):
-        """Return the best path available for a circuit, if exists."""
-        paths = self.get_paths(circuit)
-        if paths:
-            return self.create_path(self.get_paths(circuit)[0]['hops'])
-        return None
-
-    def create_path(self, path):
-        """Return the path containing only the interfaces."""
-        new_path = []
-        clean_path = self._clear_path(path)
-
-        if len(clean_path) % 2:
-            return None
-
-        for link in zip(clean_path[1:-1:2], clean_path[2::2]):
-            interface_a = self.controller.get_interface_by_id(link[0])
-            interface_b = self.controller.get_interface_by_id(link[1])
-            if interface_a is None or interface_b is None:
-                return None
-            new_path.append(Link(interface_a, interface_b))
-
-        return new_path
-
     @rest('/v2/evc/', methods=['GET'])
     def list_circuits(self):
         """Endpoint to return all circuits stored."""
-        if not self.box:
+        circuits = self.storehouse.get_data()
+        if not circuits:
             return jsonify({"response": "No circuit stored."}), 200
 
-        return jsonify(self.box.data), 200
+        return jsonify(circuits), 200
 
     @rest('/v2/evc/<circuit_id>', methods=['GET'])
     def get_circuit(self, circuit_id):
         """Endpoint to return a circuit based on id."""
-        circuits = self.box.data if self.box else {}
+        circuits = self.storehouse.get_data()
 
         if circuit_id in circuits:
             result = circuits[circuit_id]
@@ -157,13 +109,10 @@ class Main(KytosNApp):
             return jsonify("Not Acceptable: This evc already exists."), 409
 
         # save circuit
-        self.save_evc(evc)
-
-        # Request paths to Pathfinder
-        evc.primary_links = self.get_best_path(evc) or []
+        self.storehouse.save_evc(evc)
 
         # Schedule the circuit deploy
-        self.schedule.circuit_deploy(evc)
+        self.sched.add(evc)
 
         # Notify users
         event = KytosEvent(name='kytos.mef_eline.created',
@@ -171,6 +120,31 @@ class Main(KytosNApp):
         self.controller.buffers.app.put(event)
 
         return jsonify({"circuit_id": evc.id}), 201
+
+    @rest('/v2/evc/<circuit_id>', methods=['PATCH'])
+    def update(self, circuit_id):
+        """Update a circuit based on payload.
+
+        The EVC required attributes can't be updated.
+        """
+        data = request.get_json()
+        circuits = self.storehouse.get_data()
+
+        if circuit_id not in circuits:
+            result = {'response': f'circuit_id {circuit_id} not found'}
+            return jsonify(result), 404
+
+        try:
+            evc = self.evc_from_dict(circuits.get(circuit_id))
+            evc.update(**data)
+            self.storehouse.save_evc(evc)
+            result = {evc.id: evc.as_dict()}
+            status = 200
+        except ValueError as exception:
+            result = "Bad request: {}".format(exception)
+            status = 400
+
+        return jsonify(result), status
 
     def is_duplicated_evc(self, evc):
         """Verify if the circuit given is duplicated with the stored evcs.
@@ -180,11 +154,12 @@ class Main(KytosNApp):
 
         Returns:
             boolean: True if the circuit is duplicated, otherwise False.
+
         """
-        for circuit_dict in self.box.data.values():
+        for circuit_dict in self.storehouse.get_data().values():
             try:
                 circuit = self.evc_from_dict(circuit_dict)
-            except ValueError as exception:
+            except ValueError:
                 continue
 
             if circuit == evc:
@@ -192,92 +167,48 @@ class Main(KytosNApp):
 
         return False
 
-    # METHODS TO HANDLE STOREHOUSE
-    def create_box(self):
-        """Create a new box."""
-        content = {'namespace': self.namespace,
-                   'callback': self._create_box_callback,
-                   'data': {}}
-        event = KytosEvent(name='kytos.storehouse.create', content=content)
-        self.controller.buffers.app.put(event)
-        log.info('Create box from storehouse.')
-
-    def _create_box_callback(self, event, data, error):
-        """Callback to handle create_box."""
-        if error:
-            log.error(f'Can\'t create box with namespace {self.namespace}')
-
-        self.box = data
-        log.info(f'Box {self.box.box_id} was created in {self.namespace}.')
-
-    def list_stored_boxes(self):
-        """List all boxes using the current namespace."""
-        name = 'kytos.storehouse.list'
-        content = {'namespace': self.namespace,
-                   'callback': self._get_or_create_a_box_from_list_of_boxes}
-
-        event = KytosEvent(name=name, content=content)
-        self.controller.buffers.app.put(event)
-        log.info(f'Bootstraping storehouse box for {self.namespace}.')
-
-    def _get_or_create_a_box_from_list_of_boxes(self, event, data, error):
-        """Create a new box or retrieve the stored box."""
-        if len(data) == 0:
-            self.create_box()
-        else:
-            self.get_stored_box(data[0])
-
-    def get_stored_box(self, box_id):
-        """Get box from storehouse"""
-        content = {'namespace': self.namespace,
-                   'callback': self._get_box_callback,
-                   'box_id': box_id,
-                   'data': {}}
-        name = 'kytos.storehouse.retrieve'
-        event = KytosEvent(name=name, content=content)
-        self.controller.buffers.app.put(event)
-        log.info(f'Retrieve box with {box_id} from {self.namespace}.')
-
-    def _get_box_callback(self, event, data, error):
-        """Handle get_box method saving the box or logging with the error."""
-        if error:
-            log.error(f'Box {data.box_id} not found in {data.namespace}.')
-
-        self.box = data
-        log.info(f'Box {self.box.box_id} was load from storehouse.')
-
-    def save_evc(self, evc):
-        """Save a EVC using the storehouse."""
-        self.box.data[evc.id] = evc.as_dict()
-
-        content = {'namespace': self.namespace,
-                   'box_id': self.box.box_id,
-                   'data': self.box.data,
-                   'callback': self._save_evc_callback}
-
-        event = KytosEvent(name='kytos.storehouse.update', content=content)
-        self.controller.buffers.app.put(event)
-
-    def _save_evc_callback(self, event, data, error):
-        """Callback to handle save EVC."""
-        if error:
-            log.error(f'Can\'t update the {self.box.box_id}')
-
-        log.info(f'Box {data.box_id} was updated.')
-
     @listen_to('kytos/topology.updated')
-    def trigger_evc_reprovisioning(self, event):
+    def trigger_evc_reprovisioning(self, *_):
         """Listen to topology update to trigger EVCs (re)provisioning.
 
         Schedule all Circuits with valid UNIs.
         """
-        stored_data = self.box.data.values() if not self.box else []
-        for data in stored_data:
+        for data in self.storehouse.get_data().values():
             try:
                 evc = self.evc_from_dict(data)
-                self.schedule.circuit_deploy(evc)
-            except ValueError as exception:
+                self.sched.add(evc)
+            except ValueError as _exception:
                 log.debug(f'{data.get("id")} can not be provisioning yet.')
+
+    @listen_to('kytos.*.link.up', 'kytos.*.link.end_maintenance')
+    def handle_link_up(self, event):
+        """Change circuit when link is up or end_maintenance."""
+        evc = None
+
+        for data in self.storehouse.get_data().values():
+            try:
+                evc = self.evc_from_dict(data)
+            except ValueError as _exception:
+                log.debug(f'{data.get("id")} can not be provisioning yet.')
+                continue
+
+            if not evc.is_affected_by_link(event.link):
+                evc.handle_link_up(event.link)
+
+    @listen_to('kytos.*.link.down', 'kytos.*.link.under_maintenance')
+    def handle_link_down(self, event):
+        """Change circuit when link is down or under_mantenance."""
+        evc = None
+
+        for data in self.storehouse.get_data().values():
+            try:
+                evc = self.evc_from_dict(data)
+            except ValueError as _exception:
+                log.debug(f'{data.get("id")} can not be provisioning yet.')
+                continue
+
+            if not evc.is_affected_by_link(event.link):
+                evc.handle_link_down()
 
     def evc_from_dict(self, evc_dict):
         """Convert some dict values to instance of EVC classes.
@@ -291,10 +222,15 @@ class Main(KytosNApp):
             if 'uni' in attribute:
                 data[attribute] = self.uni_from_dict(value)
 
+            if attribute == 'circuit_schedule':
+                data[attribute] = []
+                for schedule in value:
+                    data[attribute].append(CircuitSchedule.from_dict(schedule))
+
             if ('path' in attribute or 'link' in attribute) and \
-               ('dynamic_backup_path' != attribute):
-                if len(value) != 0:
-                    data[attribute] = link_from_dict(value)
+               (attribute != 'dynamic_backup_path'):
+                if value:
+                    data[attribute] = self.link_from_dict(value)
 
         return EVC(**data)
 

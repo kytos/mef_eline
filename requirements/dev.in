@@ -1,0 +1,3 @@
+-e git+https://github.com/kytos/python-openflow.git#egg=python-openflow
+-e git+https://github.com/kytos/kytos.git#egg=kytos
+-e .[dev]
