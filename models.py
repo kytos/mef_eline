@@ -5,14 +5,111 @@ from uuid import uuid4
 import requests
 
 from kytos.core import log
-from kytos.core.common import GenericEntity
+from kytos.core.common import EntityStatus, GenericEntity
 from kytos.core.helpers import get_time, now
 from kytos.core.interface import UNI
+from kytos.core.link import Link
 from napps.kytos.mef_eline import settings
 
 
-class EVC(GenericEntity):
-    """Class that represents a E-Line Virtual Connection."""
+class Path(list, GenericEntity):
+    """Class to represent a Path."""
+
+    def __init__(self, *args, **kwargs):
+        """Create a path instance using links."""
+        super().__init__(*args, **kwargs)
+        self.links_cache = set(self)
+
+    def __eq__(self, other=None):
+        """Compare paths."""
+        if not other or not isinstance(other, Path):
+            return False
+        return super().__eq__(other)
+
+    def is_affected_by_link(self, link=None):
+        """Verify if the current path is affected by link."""
+        if not link:
+            return False
+        return link in self.links_cache
+
+    @property
+    def status(self):
+        """Check for the  status of a path.
+
+        If any link in this path is down, the path is considered down.
+        """
+        if not self:
+            return EntityStatus.DISABLED
+
+        for link in self:
+            if link.status is not EntityStatus.UP:
+                return link.status
+        return EntityStatus.UP
+
+    def as_dict(self):
+        """Return list comprehension of links as_dict."""
+        return [link.as_dict() for link in self if link]
+
+
+class DynamicPathManager:
+    """Class to handle and create paths."""
+
+    controller = None
+
+    @classmethod
+    def set_controller(cls, controller=None):
+        """Set the controller to discovery news paths."""
+        cls.controller = controller
+
+    @staticmethod
+    def get_paths(circuit):
+        """Get a valid path for the circuit from the Pathfinder."""
+        endpoint = settings.PATHFINDER_URL
+        request_data = {"source": circuit.uni_a.interface.id,
+                        "destination": circuit.uni_z.interface.id}
+        api_reply = requests.post(endpoint, json=request_data)
+
+        if api_reply.status_code != getattr(requests.codes, 'ok'):
+            log.error("Failed to get paths at %s. Returned %s",
+                      endpoint, api_reply.status_code)
+            return None
+        reply_data = api_reply.json()
+        return reply_data.get('paths')
+
+    @staticmethod
+    def _clear_path(path):
+        """Remove switches from a path, returning only interfaeces."""
+        return [endpoint for endpoint in path if len(endpoint) > 23]
+
+    @classmethod
+    def get_best_path(cls, circuit):
+        """Return the best path available for a circuit, if exists."""
+        paths = cls.get_paths(circuit)
+        if paths:
+            return cls.create_path(cls.get_paths(circuit)[0]['hops'])
+        return None
+
+    @classmethod
+    def create_path(cls, path):
+        """Return the path containing only the interfaces."""
+        new_path = Path()
+        clean_path = cls._clear_path(path)
+
+        if len(clean_path) % 2:
+            return None
+
+        for link in zip(clean_path[1:-1:2], clean_path[2::2]):
+            interface_a = cls.controller.get_interface_by_id(link[0])
+            interface_b = cls.controller.get_interface_by_id(link[1])
+            if interface_a is None or interface_b is None:
+                return None
+            new_path.append(Link(interface_a, interface_b))
+
+        return new_path
+
+
+class EVCBase(GenericEntity):
+    """Class to represent a circuit."""
 
     unique_attributes = ['name', 'uni_a', 'uni_z']
 
@@ -31,7 +128,7 @@ class EVC(GenericEntity):
             bandwidth(int): Bandwidth used by EVC instance. Default is 0.
             primary_links(list): Primary links used by evc. Default is []
             backup_links(list): Backups links used by evc. Default is []
-            current_path(list):circuit being used at the moment if this is an
+            current_path(list): Circuit being used at the moment if this is an
                                 active circuit. Default is [].
             primary_path(list): primary circuit offered to user IF one or more
                                 links were provided. Default is [].
@@ -66,11 +163,11 @@ class EVC(GenericEntity):
         self.end_date = get_time(kwargs.get('end_date')) or None
 
         self.bandwidth = kwargs.get('bandwidth', 0)
-        self.primary_links = kwargs.get('primary_links', [])
-        self.backup_links = kwargs.get('backup_links', [])
-        self.current_path = kwargs.get('current_path', [])
-        self.primary_path = kwargs.get('primary_path', [])
-        self.backup_path = kwargs.get('backup_path', [])
+        self.primary_links = Path(kwargs.get('primary_links', []))
+        self.backup_links = Path(kwargs.get('backup_links', []))
+        self.current_path = Path(kwargs.get('current_path', []))
+        self.primary_path = Path(kwargs.get('primary_path', []))
+        self.backup_path = Path(kwargs.get('backup_path', []))
         self.dynamic_backup_path = kwargs.get('dynamic_backup_path', False)
         self.creation_time = get_time(kwargs.get('creation_time')) or now()
         self.owner = kwargs.get('owner', None)
@@ -104,7 +201,7 @@ class EVC(GenericEntity):
 
         """
         for attribute, value in kwargs.items():
-            if attribute in self.unique_attributes:
+            if attribute in self.unique_attributes and attribute != 'name':
                 raise ValueError(f'{attribute} can\'t be be updated.')
             if hasattr(self, attribute):
                 setattr(self, attribute, value)
@@ -159,10 +256,6 @@ class EVC(GenericEntity):
 
         time_fmt = "%Y-%m-%dT%H:%M:%S"
 
-        def link_as_dict(links):
-            """Return list comprehension of links as_dict."""
-            return [link.as_dict() for link in links if link]
-
         evc_dict["start_date"] = self.start_date
         if isinstance(self.start_date, datetime):
             evc_dict["start_date"] = self.start_date.strftime(time_fmt)
@@ -172,11 +265,11 @@ class EVC(GenericEntity):
             evc_dict["end_date"] = self.end_date.strftime(time_fmt)
 
         evc_dict['bandwidth'] = self.bandwidth
-        evc_dict['primary_links'] = link_as_dict(self.primary_links)
-        evc_dict['backup_links'] = link_as_dict(self.backup_links)
-        evc_dict['current_path'] = link_as_dict(self.current_path)
-        evc_dict['primary_path'] = link_as_dict(self.primary_path)
-        evc_dict['backup_path'] = link_as_dict(self.backup_path)
+        evc_dict['primary_links'] = self.primary_links.as_dict()
+        evc_dict['backup_links'] = self.backup_links.as_dict()
+        evc_dict['current_path'] = self.current_path.as_dict()
+        evc_dict['primary_path'] = self.primary_path.as_dict()
+        evc_dict['backup_path'] = self.backup_path.as_dict()
         evc_dict['dynamic_backup_path'] = self.dynamic_backup_path
 
         if self._requested:
@@ -200,15 +293,24 @@ class EVC(GenericEntity):
 
         return evc_dict
 
+    @property
+    def id(self):  # pylint: disable=invalid-name
+        """Return this EVC's ID."""
+        return self._id
+
+
+class EVCDeploy(EVCBase):
+    """Class to handle the deploy procedures."""
+
     def create(self):
         """Create a EVC."""
         pass
 
     def discover_new_path(self):
-        """Discover a new path for EVC."""
-        pass
+        """Discover a new path to satisfy this circuit and deploy."""
+        return DynamicPathManager.get_best_path(self)
 
-    def change_path(self, path):
+    def change_path(self):
         """Change EVC path."""
         pass
 
@@ -220,27 +322,40 @@ class EVC(GenericEntity):
         """Remove EVC path."""
         pass
 
-    @property
-    def id(self):  # pylint: disable=invalid-name
-        """Return this EVC's ID."""
-        return self._id
+    def remove_current_flows(self):
+        """Remove all flows from current path."""
+        switches = set()
 
-    def _chose_vlans(self):
-        """Chose the VLANs to be used for the circuit."""
-        for link in self.primary_links:
+        for link in self.current_path:
+            switches.add(link.endpoint_a.switch)
+            switches.add(link.endpoint_b.switch)
+
+        flows = [{'cookie': self.get_cookie()}]
+
+        for switch in switches:
+            self.send_flow_mods(switch, flows, 'delete')
+
+        self.deactivate()
+
+    @staticmethod
+    def choose_vlans(path=None):
+        """Choose the VLANs to be used for the circuit."""
+        for link in path:
             tag = link.get_next_available_tag()
             link.use_tag(tag)
             link.add_metadata('s_vlan', tag)
 
-    def primary_links_zipped(self):
+    @staticmethod
+    def links_zipped(path=None):
         """Return an iterator which yields pairs of links in order."""
-        return zip(self.primary_links[:-1],
-                   self.primary_links[1:])
+        if not path:
+            return []
+        return zip(path[:-1], path[1:])
 
-    def should_deploy(self):
+    def should_deploy(self, path=None):
         """Verify if the circuit should be deployed."""
-        if not self.primary_links:
-            log.debug("Primary links are empty.")
+        if not path:
+            log.debug("Path is empty.")
             return False
 
         if not self.is_enabled():
@@ -253,20 +368,42 @@ class EVC(GenericEntity):
 
         return False
 
-    def deploy(self):
-        """Install the flows for this circuit."""
-        if not self.should_deploy():
-            return
+    def deploy(self, path=None):
+        """Install the flows for this circuit.
 
-        self._chose_vlans()
-        self.install_nni_flows()
-        self.install_uni_flows()
+        Procedures to deploy:
+
+        0. Remove current flows installed
+        1. Decide if will deploy "path" or discover a new path
+        2. Choose vlan
+        3. Install NNI flows
+        4. Install UNI flows
+        5. Activate
+        6. Update current_path
+        7. Update links caches(primary, current, backup)
+
+        """
+        self.remove_current_flows()
+
+        if not self.should_deploy(path):
+            return False
+
+        if path is None:
+            path = self.discover_new_path()
+
+            if not path:
+                return False
+
+        self.choose_vlans(path)
+        self.install_nni_flows(path)
+        self.install_uni_flows(path)
         self.activate()
         log.info(f"{self} was deployed.")
+        return True
 
-    def install_nni_flows(self):
+    def install_nni_flows(self, path=None):
         """Install NNI flows."""
-        for incoming, outcoming in self.primary_links_zipped():
+        for incoming, outcoming in self.links_zipped(path):
             in_vlan = incoming.get_metadata('s_vlan').value
             out_vlan = outcoming.get_metadata('s_vlan').value
 
@@ -282,27 +419,30 @@ class EVC(GenericEntity):
                                                out_vlan, in_vlan))
             self.send_flow_mods(incoming.endpoint_b.switch, flows)
 
-    def install_uni_flows(self):
+    def install_uni_flows(self, path=None):
         """Install UNI flows."""
-        # Install UNI flows
+        if not path:
+            log.info('install uni flows without path.')
+            return
+
         # Determine VLANs
         in_vlan_a = self.uni_a.user_tag.value if self.uni_a.user_tag else None
-        out_vlan_a = self.primary_links[0].get_metadata('s_vlan').value
+        out_vlan_a = path[0].get_metadata('s_vlan').value
 
         in_vlan_z = self.uni_z.user_tag.value if self.uni_z.user_tag else None
-        out_vlan_z = self.primary_links[-1].get_metadata('s_vlan').value
+        out_vlan_z = path[-1].get_metadata('s_vlan').value
 
         # Flows for the first UNI
         flows_a = []
 
         # Flow for one direction, pushing the service tag
         push_flow = self.prepare_push_flow(self.uni_a.interface,
-                                           self.primary_links[0].endpoint_a,
+                                           path[0].endpoint_a,
                                            in_vlan_a, out_vlan_a, in_vlan_z)
         flows_a.append(push_flow)
 
         # Flow for the other direction, popping the service tag
-        pop_flow = self.prepare_pop_flow(self.primary_links[0].endpoint_a,
+        pop_flow = self.prepare_pop_flow(path[0].endpoint_a,
                                          self.uni_a.interface, out_vlan_a)
         flows_a.append(pop_flow)
 
@@ -313,32 +453,44 @@ class EVC(GenericEntity):
 
         # Flow for one direction, pushing the service tag
         push_flow = self.prepare_push_flow(self.uni_z.interface,
-                                           self.primary_links[-1].endpoint_b,
+                                           path[-1].endpoint_b,
                                            in_vlan_z, out_vlan_z, in_vlan_a)
         flows_z.append(push_flow)
 
         # Flow for the other direction, popping the service tag
-        pop_flow = self.prepare_pop_flow(self.primary_links[-1].endpoint_b,
+        pop_flow = self.prepare_pop_flow(path[-1].endpoint_b,
                                          self.uni_z.interface, out_vlan_z)
         flows_z.append(pop_flow)
 
         self.send_flow_mods(self.uni_z.interface.switch, flows_z)
 
     @staticmethod
-    def send_flow_mods(switch, flow_mods):
-        """Send a flow_mod list to a specific switch."""
-        endpoint = "%s/flows/%s" % (settings.MANAGER_URL, switch.id)
+    def send_flow_mods(switch, flow_mods, command='flows'):
+        """Send a flow_mod list to a specific switch.
+
+        Args:
+            switch(Switch): The target of flows.
+            flow_mods(dict): Python dictionary with flow_mods.
+            command(str): By default is 'flows'. To remove a flow is 'remove'.
+
+        """
+        endpoint = f'{settings.MANAGER_URL}/{command}/{switch.id}'
 
         data = {"flows": flow_mods}
         requests.post(endpoint, json=data)
 
-    @staticmethod
-    def prepare_flow_mod(in_interface, out_interface):
+    def get_cookie(self):
+        """Return the cookie integer from evc id."""
+        value = self.id[len(self.id)//2:]
+        return int(value, 16)
+
+    def prepare_flow_mod(self, in_interface, out_interface):
         """Prepare a common flow mod."""
         default_action = {"action_type": "output",
                           "port": out_interface.port_number}
 
         flow_mod = {"match": {"in_port": in_interface.port_number},
+                    "cookie": self.get_cookie(),
                     "actions": [default_action]}
 
         return flow_mod
@@ -395,3 +547,104 @@ class EVC(GenericEntity):
         new_action = {"action_type": "pop_vlan"}
         flow_mod["actions"].insert(0, new_action)
         return flow_mod
+
+
+class LinkProtection(EVCDeploy):
+    """Class to handle link protection."""
+
+    def is_affected_by_link(self, link=None):
+        """Verify if the current path is affected by link down event."""
+        return self.current_path.is_affected_by_link(link)
+
+    def is_using_primary_path(self):
+        """Verify if the current deployed path is self.primary_path."""
+        return self.current_path == self.primary_path
+
+    def is_using_backup_path(self):
+        """Verify if the current deployed path is self.backup_path."""
+        return self.current_path == self.backup_path
+
+    def is_using_dynamic_path(self):
+        """Verify if the current deployed path is dynamic."""
+        if not self.is_using_primary_path() and \
+           not self.is_using_backup_path() and \
+           self.current_path.status is EntityStatus.UP:
+            return True
+        return False
+
+    def deploy_to(self, path_name=None, path=None):
+        """Create a deploy to path."""
+        if self.current_path == path:
+            log.debug(f'{path_name} is equal to current_path.')
+            return True
+
+        if path.status is EntityStatus.UP:
+            return self.deploy(path)
+
+        return False
+
+    def handle_link_up(self, link):
+        """Handle circuit when link down.
+
+        Args:
+            link(Link): Link affected by link.down event.
+
+        """
+        if self.is_using_primary_path():
+            return True
+
+        success = False
+        if self.primary_path.is_affected_by_link(link):
+            success = self.deploy_to('primary_path', self.primary_path)
+
+        if success:
+            return True
+
+        # We tried to deploy(primary_path) without success.
+        # And in this case is up by some how. Nothing to do.
+        if self.is_using_backup_path() or self.is_using_dynamic_path():
+            return True
+
+        # In this case, probably the circuit is not being used and
+        # we can move to backup
+        if self.backup_path.is_affected_by_link(link):
+            success = self.deploy_to('backup_path', self.backup_path)
+
+        if success:
+            return True
+
+        # In this case, the circuit is not being used and we should
+        # try a dynamic path
+        if self.dynamic_backup_path:
+            return self.deploy()
+
+        return True
+
+    def handle_link_down(self):
+        """Handle circuit when link down.
+
+        Returns:
+            bool: True if the re-deploy was successly otherwise False.
+
+        """
+        success = False
+        if self.is_using_primary_path():
+            success = self.deploy_to('backup_path', self.backup_path)
+        elif self.is_using_backup_path():
+            success = self.deploy_to('primary_path', self.primary_path)
+
+        if not success and self.dynamic_backup_path:
+            success = self.deploy()
+
+        if success:
+            log.debug(f"{self} deployed after link down.")
+        else:
+            log.debug(f'Failed to re-deploy {self} after link down.')
+
+        return success
+
+
+class EVC(LinkProtection):
+    """Class that represents a E-Line Virtual Connection."""
+
+    pass

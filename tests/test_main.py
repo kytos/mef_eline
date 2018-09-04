@@ -24,6 +24,10 @@ class TestMain(TestCase):
         """Verify all event listeners registered."""
         expected_events = ['kytos/core.shutdown',
                            'kytos/core.shutdown.kytos/mef_eline',
+                           'kytos.*.link.down',
+                           'kytos.*.link.under_maintenance',
+                           'kytos.*.link.up',
+                           'kytos.*.link.end_maintenance',
                            'kytos/topology.updated']
         actual_events = self.napp.listeners()
         self.assertEqual(expected_events, actual_events)
@@ -94,19 +98,17 @@ class TestMain(TestCase):
     @patch('napps.kytos.mef_eline.storehouse.StoreHouse.get_data')
     @patch('napps.kytos.mef_eline.scheduler.Scheduler.add')
     @patch('napps.kytos.mef_eline.main.Main.uni_from_dict')
-    @patch('napps.kytos.mef_eline.main.Main.get_best_path')
     @patch('napps.kytos.mef_eline.storehouse.StoreHouse.save_evc')
     @patch('napps.kytos.mef_eline.main.EVC.as_dict')
     @patch('napps.kytos.mef_eline.models.EVC._validate')
     def test_create_a_circuit(self, *args):
         """Test create a new circuit."""
-        (validate_mock, evc_as_dict_mock, save_evc_mock, get_best_path_mock,
+        (validate_mock, evc_as_dict_mock, save_evc_mock,
          uni_from_dict_mock, sched_add_mock, storehouse_data_mock) = args
 
         validate_mock.return_value = True
         save_evc_mock.return_value = True
         uni_from_dict_mock.side_effect = ['uni_a', 'uni_z']
-        get_best_path_mock.return_value = True
         evc_as_dict_mock.return_value = {}
         sched_add_mock.return_value = True
         storehouse_data_mock.return_value = {}
@@ -153,8 +155,6 @@ class TestMain(TestCase):
         # verify save method is called
         save_evc_mock.assert_called_once()
 
-        # verify get_best_path is called
-        get_best_path_mock.assert_called_once()
         # verify evc as dict is called to save in the box
         evc_as_dict_mock.assert_called_once()
         # verify add circuit in sched
