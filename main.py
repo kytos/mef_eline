@@ -9,6 +9,7 @@ from kytos.core.events import KytosEvent
 from kytos.core.helpers import listen_to
 from kytos.core.interface import TAG, UNI
 from kytos.core.link import Link
+from napps.kytos.mef_eline import settings
 from napps.kytos.mef_eline.models import EVC, DynamicPathManager
 from napps.kytos.mef_eline.scheduler import CircuitSchedule, Scheduler
 from napps.kytos.mef_eline.storehouse import StoreHouse
@@ -212,6 +213,27 @@ class Main(KytosNApp):
 
             if not evc.is_affected_by_link(event.link):
                 evc.handle_link_down()
+
+    @listen_to('kytos/of_core.switch.port.created')
+    def handle_switches_settings(self, event):
+        """Apply switch settings whenever a new switch port is created.
+
+        This is the first event after a handshake when we know
+        for sure that the port object reference has been updated."""
+        dpid = event.content.get('switch')
+        if dpid:
+            debug_msg = "Setting VLANs {} on sw {} on port {}"
+            vlan_pool = settings.VLAN_POOL_OVERRIDE
+            if dpid in vlan_pool:
+                ofp_ports = vlan_pool[dpid]
+                switch_ref = self.controller.switches[dpid]
+                for ofp_port, vlan_range in ofp_ports.items():
+                    intf = switch_ref.interfaces.get(ofp_port)
+                    if intf:
+                        if intf.available_tags != vlan_range:
+                            log.debug(debug_msg.format(str(vlan_range),
+                                                       dpid, str(ofp_port)))
+                            intf.set_available_tags(vlan_range)
 
     def evc_from_dict(self, evc_dict):
         """Convert some dict values to instance of EVC classes.
