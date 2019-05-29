@@ -200,7 +200,8 @@ class Main(KytosNApp):
                 log.debug(f'{data.get("id")} can not be provisioning yet.')
                 continue
 
-            evc.handle_link_up(event.content['link'])
+            if evc.schedule_active:
+                evc.handle_link_up(event.content['link'])
 
     @listen_to('kytos/topology.link_down')
     def handle_link_down(self, event):
@@ -214,7 +215,7 @@ class Main(KytosNApp):
                 log.debug(f'{data.get("id")} can not be provisioned yet.')
                 continue
 
-            if evc.is_affected_by_link(event.content['link']):
+            if evc.is_active() and evc.is_affected_by_link(event.content['link']):
                 log.info('handling evc %s' % evc)
                 evc.handle_link_down()
 
