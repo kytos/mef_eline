@@ -60,9 +60,9 @@ class Scheduler:
             action = None
 
             if circuit_scheduler.action == 'create':
-                action = circuit.deploy
+                action = circuit.schedule_deploy
             elif circuit_scheduler.action == 'remove':
-                action = circuit.remove
+                action = circuit.schedule_remove
 
             if circuit_scheduler.date:
                 data.update({'run_date': circuit_scheduler.date})
