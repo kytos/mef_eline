@@ -109,7 +109,8 @@ class TestScheduler(TestCase):
             "id": circuit_scheduler.id,
             "run_date": circuit_scheduler.date,
             }
-        scheduler_add_job_mock.assert_called_once_with(evc.remove, 'date',
+        scheduler_add_job_mock.assert_called_once_with(evc.schedule_remove,
+                                                       'date',
                                                        **expected_parameters)
 
     @patch('apscheduler.schedulers.background.BackgroundScheduler.add_job')
@@ -140,7 +141,8 @@ class TestScheduler(TestCase):
             "minutes": 3,
             "start_date": evc.start_date,
         }
-        scheduler_add_job_mock.assert_called_once_with(evc.deploy, 'interval',
+        scheduler_add_job_mock.assert_called_once_with(evc.schedule_deploy,
+                                                       'interval',
                                                        **expected_parameters)
 
     @patch('apscheduler.triggers.cron.CronTrigger.from_crontab')
@@ -174,5 +176,6 @@ class TestScheduler(TestCase):
             "id": circuit_scheduler.id,
             "start_date": evc.start_date
         }
-        scheduler_add_job_mock.assert_called_once_with(evc.deploy, trigger,
+        scheduler_add_job_mock.assert_called_once_with(evc.schedule_deploy,
+                                                       trigger,
                                                        **expected_parameters)
