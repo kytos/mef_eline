@@ -215,7 +215,8 @@ class Main(KytosNApp):
                 log.debug(f'{data.get("id")} can not be provisioned yet.')
                 continue
 
-            if evc.is_active() and evc.is_affected_by_link(event.content['link']):
+            if evc.is_active() and \
+               evc.is_affected_by_link(event.content['link']):
                 log.info('handling evc %s' % evc)
                 evc.handle_link_down()
 
