@@ -183,7 +183,7 @@ class Main(KytosNApp):
             except ValueError:
                 continue
 
-            if circuit == evc:
+            if circuit.is_enabled() and circuit == evc:
                 return True
 
         return False
