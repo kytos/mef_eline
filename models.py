@@ -202,9 +202,9 @@ class EVCBase(GenericEntity):
         self.owner = kwargs.get('owner', None)
         self.priority = kwargs.get('priority', 0)
         self.circuit_scheduler = kwargs.get('circuit_scheduler', [])
-        self.schedule_active = kwargs.get('schedule_active', False)
+        self.should_be_active = kwargs.get('should_be_active', False)
         if not self.circuit_scheduler:
-            self.schedule_active = True
+            self.should_be_active = True
 
         self.current_links_cache = set()
         self.primary_links_cache = set()
@@ -336,7 +336,7 @@ class EVCBase(GenericEntity):
         evc_dict['active'] = self.is_active()
         evc_dict['enabled'] = self.is_enabled()
         evc_dict['priority'] = self.priority
-        evc_dict['schedule_active'] = self.schedule_active
+        evc_dict['should_be_active'] = self.should_be_active
 
         return evc_dict
 
@@ -440,12 +440,12 @@ class EVCDeploy(EVCBase):
 
     def schedule_deploy(self):
         """Set called by schedule and call deploy."""
-        self.schedule_active = True
+        self.should_be_active = True
         self.deploy()
 
     def schedule_remove(self):
         """Set called by schedule and call remove."""
-        self.schedule_active = False
+        self.should_be_active = False
         self.remove()
 
     def deploy(self):

@@ -200,7 +200,7 @@ class Main(KytosNApp):
                 log.debug(f'{data.get("id")} can not be provisioning yet.')
                 continue
 
-            if evc.schedule_active:
+            if evc.should_be_active:
                 evc.handle_link_up(event.content['link'])
 
     @listen_to('kytos/topology.link_down')
