@@ -3,25 +3,30 @@ Changelog
 #########
 All notable changes to the MEF_ELine NApp will be documented in this file.
 
-[UNRELEASED] - Under development
+[2.3.2] - 2019-06-12
 ********************************
 Added
 =====
  - Added EVC status check when deploying using schedule.
  - Serialize circuit scheduler for storehouse.
  - Fix VLAN availability on interfaces after using them.
+ - Documentation about delete method.
 
 Changed
 =======
+  - Updated coments on methods.
+  - Updated OpenApi Models description and documentation.
 
 Deprecated
 ==========
 
 Removed
 =======
+  - Removed dependencies.
 
 Fixed
 =====
+  - Linter issues
 
 Security
 ========
