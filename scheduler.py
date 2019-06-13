@@ -91,11 +91,12 @@ class Scheduler:
         :param circuit_scheduler (CircuitSchedule): Circuit schedule data
         :return:
         """
-        job_call = None
         if circuit_scheduler.action == 'create':
             job_call = circuit.deploy
         elif circuit_scheduler.action == 'remove':
             job_call = circuit.remove
+        else:
+            return
 
         data = {'id': circuit_scheduler.id}
         if circuit_scheduler.date:
