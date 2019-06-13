@@ -57,12 +57,13 @@ class Scheduler:
         """Add all circuit_scheduler from specific circuit."""
         for circuit_scheduler in circuit.circuit_scheduler:
             data = {'id': circuit_scheduler.id}
-            action = None
 
             if circuit_scheduler.action == 'create':
                 action = circuit.deploy
             elif circuit_scheduler.action == 'remove':
                 action = circuit.remove
+            else:
+                continue
 
             if circuit_scheduler.date:
                 data.update({'run_date': circuit_scheduler.date})
