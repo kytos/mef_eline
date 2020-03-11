@@ -399,7 +399,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(install_uni_flows_mock.call_count, 1)
         self.assertEqual(install_nni_flows.call_count, 1)
         self.assertEqual(chose_vlans_mock.call_count, 1)
-        log_mock.info.assert_called_once_with(f"{evc} was deployed.")
+        log_mock.info.assert_called_with(f"{evc} was deployed.")
         self.assertTrue(deployed)
 
     @patch('napps.kytos.mef_eline.models.log')
@@ -505,7 +505,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(install_uni_flows_mock.call_count, 1)
         self.assertEqual(install_nni_flows.call_count, 1)
         self.assertEqual(chose_vlans_mock.call_count, 1)
-        self.assertEqual(log_mock.info.call_count, 1)
+        log_mock.info.assert_called_with(f"{evc} was deployed.")
         self.assertTrue(deployed)
 
     @patch('napps.kytos.mef_eline.models.EVC._send_flow_mods')

@@ -13,6 +13,9 @@ from napps.kytos.mef_eline.models import EVC, Path  # NOQA pycodestyle
 from tests.helpers import MockResponse, get_link_mocked,\
     get_uni_mocked, get_controller_mock  # NOQA pycodestyle
 
+DEPLOY_TO_PRIMARY_PATH = \
+    'napps.kytos.mef_eline.models.LinkProtection.deploy_to_primary_path'
+
 
 class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
     """Tests to validate LinkProtection class."""
@@ -151,13 +154,16 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
         self.assertFalse(deployed)
 
     @patch('napps.kytos.mef_eline.models.log')
-    @patch('napps.kytos.mef_eline.models.LinkProtection.deploy_to')
+    @patch('napps.kytos.mef_eline.models.EVCDeploy._send_flow_mods')
+    @patch('napps.kytos.mef_eline.models.LinkProtection.deploy_to_backup_path')
     @patch('napps.kytos.mef_eline.models.EVCDeploy.deploy')
-    @patch('napps.kytos.mef_eline.models.Path.status', EntityStatus.UP)
-    def test_handle_link_down_case_1(self, deploy_mocked, deploy_to_mocked,
-                                     log_mocked):
+    @patch('napps.kytos.mef_eline.models.Path.status')
+    def test_handle_link_down_case_1(self, path_status_mocked,
+                                     deploy_mocked, deploy_to_mocked,
+                                     _send_flow_mods_mocked, log_mocked):
         """Test if deploy_to backup path is called."""
         deploy_mocked.return_value = True
+        path_status_mocked.side_effect = [EntityStatus.DOWN, EntityStatus.UP]
 
         primary_path = [
                 get_link_mocked(endpoint_a_port=9, endpoint_b_port=10,
@@ -189,22 +195,25 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
         evc.current_path = evc.primary_path
         current_handle_link_down = evc.handle_link_down()
         self.assertEqual(deploy_mocked.call_count, 0)
-        deploy_to_mocked.assert_called_once_with('backup_path',
-                                                 evc.backup_path)
+        deploy_to_mocked.assert_called_once()
+
         self.assertTrue(current_handle_link_down)
         msg = f"{evc} deployed after link down."
         log_mocked.debug.assert_called_once_with(msg)
 
     @patch('napps.kytos.mef_eline.models.log')
     @patch('napps.kytos.mef_eline.models.EVCDeploy.deploy')
-    @patch('napps.kytos.mef_eline.models.LinkProtection.deploy_to')
-    def test_handle_link_down_case_2(self, deploy_to_mocked, deploy_mocked,
+    @patch(DEPLOY_TO_PRIMARY_PATH)
+    @patch('napps.kytos.mef_eline.models.Path.status')
+    def test_handle_link_down_case_2(self, path_status_mocked,
+                                     deploy_to_mocked, deploy_mocked,
                                      log_mocked):
         """Test if deploy_to backup path is called."""
         deploy_mocked.return_value = True
         deploy_to_mocked.return_value = True
+        path_status_mocked.side_effect = [EntityStatus.UP, EntityStatus.DOWN]
         primary_path = [
-                get_link_mocked(endpoint_a_port=9, endpoint_b_port=10,
+                get_link_mocked(endpoint_a_port=7, endpoint_b_port=8,
                                 metadata={"s_vlan": 5},
                                 status=EntityStatus.UP),
                 get_link_mocked(endpoint_a_port=11, endpoint_b_port=12,
@@ -233,16 +242,16 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
         evc.current_path = evc.backup_path
         current_handle_link_down = evc.handle_link_down()
         self.assertEqual(deploy_mocked.call_count, 0)
-        deploy_to_mocked.assert_called_once_with('primary_path',
-                                                 evc.primary_path)
+        deploy_to_mocked.assert_called_once()
         self.assertTrue(current_handle_link_down)
         msg = f"{evc} deployed after link down."
         log_mocked.debug.assert_called_once_with(msg)
 
     @patch('napps.kytos.mef_eline.models.log')
     @patch('napps.kytos.mef_eline.models.EVCDeploy.deploy')
-    @patch('napps.kytos.mef_eline.models.LinkProtection.deploy_to')
+    @patch(DEPLOY_TO_PRIMARY_PATH)
     @patch('napps.kytos.mef_eline.models.DynamicPathManager.get_paths')
+    @patch('napps.kytos.mef_eline.models.Path.status', EntityStatus.DOWN)
     def test_handle_link_down_case_3(self, get_paths_mocked,
                                      deploy_to_mocked, deploy_mocked,
                                      log_mocked):
@@ -261,7 +270,7 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
                 get_link_mocked(endpoint_a_port=9, endpoint_b_port=10,
                                 metadata={"s_vlan": 5},
                                 status=EntityStatus.DOWN),
-                get_link_mocked(endpoint_a_port=11, endpoint_b_port=12,
+                get_link_mocked(endpoint_a_port=13, endpoint_b_port=14,
                                 metadata={"s_vlan": 6},
                                 status=EntityStatus.UP),
         ]
@@ -282,8 +291,7 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(get_paths_mocked.call_count, 0)
         self.assertEqual(deploy_mocked.call_count, 0)
         self.assertEqual(deploy_to_mocked.call_count, 1)
-        deploy_to_mocked.assert_called_once_with('primary_path',
-                                                 evc.primary_path)
+
         self.assertFalse(current_handle_link_down)
         msg = f'Failed to re-deploy {evc} after link down.'
         log_mocked.debug.assert_called_once_with(msg)
@@ -292,11 +300,11 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
     @patch('napps.kytos.mef_eline.models.EVCDeploy.deploy')
     @patch('napps.kytos.mef_eline.models.EVCDeploy._send_flow_mods')
     @patch('napps.kytos.mef_eline.models.DynamicPathManager.get_best_path')
-    @patch('napps.kytos.mef_eline.models.LinkProtection.deploy_to')
+    @patch(DEPLOY_TO_PRIMARY_PATH)
     @patch('napps.kytos.mef_eline.models.Path.status', EntityStatus.DOWN)
     def test_handle_link_down_case_4(self, deploy_to_mocked,
-                                     _send_flow_mods_mocked,
                                      get_best_path_mocked,
+                                     _send_flow_mods_mocked,
                                      deploy_mocked,
                                      log_mocked):
         """Test if circuit with dynamic path is return success."""
@@ -314,7 +322,7 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
                 get_link_mocked(endpoint_a_port=9, endpoint_b_port=10,
                                 metadata={"s_vlan": 5},
                                 status=EntityStatus.DOWN),
-                get_link_mocked(endpoint_a_port=11, endpoint_b_port=12,
+                get_link_mocked(endpoint_a_port=13, endpoint_b_port=14,
                                 metadata={"s_vlan": 6},
                                 status=EntityStatus.UP),
         ]
@@ -338,10 +346,9 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
 
         current_handle_link_down = evc.handle_link_down()
 
-        self.assertEqual(get_best_path_mocked.call_count, 6)
+        self.assertEqual(get_best_path_mocked.call_count, 1)
         self.assertEqual(deploy_to_mocked.call_count, 1)
-        deploy_to_mocked.assert_called_once_with('primary_path',
-                                                 evc.primary_path)
+
         self.assertTrue(current_handle_link_down)
         msg = f"{evc} deployed after link down."
         log_mocked.debug.assert_called_with(msg)

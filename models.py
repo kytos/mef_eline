@@ -167,10 +167,12 @@ class EVCBase(GenericEntity):
                                        Dafault is False.
             creation_time(datetime|str): datetime when the circuit should be
                                          activated. default is now().
-            enabled(Boolean): attribute to indicate the operational state.
+            enabled(Boolean): attribute to indicate the administrative state;
                               default is False.
-            active(Boolean): attribute to Administrative state;
+            active(Boolean): attribute to indicate the operational state;
                              default is False.
+            archived(Boolean): indicate the EVC has been deleted and is
+                               archived; default is False.
             owner(str): The EVC owner. Default is None.
             priority(int): Service level provided in the request. Default is 0.
 
@@ -207,6 +209,8 @@ class EVCBase(GenericEntity):
         self.primary_links_cache = set()
         self.backup_links_cache = set()
 
+        self.archived = kwargs.get('archived', False)
+
         self._storehouse = StoreHouse(controller)
 
         if kwargs.get('active', False):
@@ -228,6 +232,7 @@ class EVCBase(GenericEntity):
     def sync(self):
         """Sync this EVC in the storehouse."""
         self._storehouse.save_evc(self)
+        log.info(f'EVC {self.id} was synced to the storehouse.')
 
     def update(self, **kwargs):
         """Update evc attributes.
@@ -235,18 +240,27 @@ class EVCBase(GenericEntity):
         This method will raises an error trying to change the following
         attributes: [name, uni_a and uni_z]
 
+        Returns:
+            the values for enable and a path attribute, if exists and None
+            otherwise
         Raises:
             ValueError: message with error detail.
 
         """
+        enable, path = (None, None)
         for attribute, value in kwargs.items():
             if attribute in self.unique_attributes:
                 raise ValueError(f'{attribute} can\'t be be updated.')
             if hasattr(self, attribute):
                 setattr(self, attribute, value)
+                if 'enable' in attribute:
+                    enable = value
+                elif 'path' in attribute:
+                    path = value
             else:
                 raise ValueError(f'The attribute "{attribute}" is invalid.')
         self.sync()
+        return enable, path
 
     def __repr__(self):
         """Repr method."""
@@ -332,6 +346,7 @@ class EVCBase(GenericEntity):
 
         evc_dict['active'] = self.is_active()
         evc_dict['enabled'] = self.is_enabled()
+        evc_dict['archived'] = self.archived
         evc_dict['priority'] = self.priority
 
         return evc_dict
@@ -340,6 +355,10 @@ class EVCBase(GenericEntity):
     def id(self):  # pylint: disable=invalid-name
         """Return this EVC's ID."""
         return self._id
+
+    def archive(self):
+        """Archive this EVC on deletion."""
+        self.archived = True
 
 
 # pylint: disable=fixme, too-many-public-methods
@@ -378,11 +397,11 @@ class EVCDeploy(EVCBase):
 
     def is_using_primary_path(self):
         """Verify if the current deployed path is self.primary_path."""
-        return self.current_path == self.primary_path
+        return self.primary_path and (self.current_path == self.primary_path)
 
     def is_using_backup_path(self):
         """Verify if the current deployed path is self.backup_path."""
-        return self.current_path == self.backup_path
+        return self.backup_path and (self.current_path == self.backup_path)
 
     def is_using_dynamic_path(self):
         """Verify if the current deployed path is a dynamic path."""
@@ -440,7 +459,9 @@ class EVCDeploy(EVCBase):
         Best path can be the primary path, if available. If not, the backup
         path, and, if it is also not available, a dynamic path.
         """
-        self.activate()
+        if self.archived:
+            return False
+        self.enable()
         success = self.deploy_to_primary_path()
         if not success:
             success = self.deploy_to_backup_path()
@@ -467,6 +488,8 @@ class EVCDeploy(EVCBase):
     def remove(self):
         """Remove EVC path and disable it."""
         self.remove_current_flows()
+        self.disable()
+        self.sync()
 
     def remove_current_flows(self):
         """Remove all flows from current path."""
@@ -770,9 +793,9 @@ class LinkProtection(EVCDeploy):
         """
         success = False
         if self.is_using_primary_path():
-            success = self.deploy_to('backup_path', self.backup_path)
+            success = self.deploy_to_backup_path()
         elif self.is_using_backup_path():
-            success = self.deploy_to('primary_path', self.primary_path)
+            success = self.deploy_to_primary_path()
 
         if not success and self.dynamic_backup_path:
             success = self.deploy_to_path()
@@ -780,6 +803,9 @@ class LinkProtection(EVCDeploy):
         if success:
             log.debug(f"{self} deployed after link down.")
         else:
+            self.deactivate()
+            self.current_path = Path([])
+            self.sync()
             log.debug(f'Failed to re-deploy {self} after link down.')
 
         return success

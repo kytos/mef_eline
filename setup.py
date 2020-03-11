@@ -1,6 +1,6 @@
 """Setup script.
 
-Run "python3 setup --help-commands" to list all available commands and their
+Run "python3 setup.py --help-commands" to list all available commands and their
 descriptions.
 """
 import os
@@ -23,6 +23,9 @@ if 'VIRTUAL_ENV' in os.environ:
     BASE_ENV = Path(os.environ['VIRTUAL_ENV'])
 else:
     BASE_ENV = Path('/')
+
+NAPP_NAME = 'mef_eline'
+NAPP_VERSION = '2.3.1'
 
 # Kytos var folder
 VAR_PATH = BASE_ENV / 'var' / 'lib' / 'kytos'
@@ -74,8 +77,11 @@ class TestCoverage(SimpleCommand):
 
     def run(self):
         """Run unittest quietly and display coverage report."""
+        # cmd = 'coverage3 run -m unittest discover -qs src' \
+        #       ' && coverage3 report'
+
         cmd = 'coverage3 run -m unittest && coverage3 report'
-        check_call(cmd, shell=True)
+        call(cmd, shell=True)
 
 
 class Linter(SimpleCommand):
@@ -84,10 +90,16 @@ class Linter(SimpleCommand):
     description = 'lint Python source code'
 
     def run(self):
-        """Run yala."""
+        """Run Yala."""
         print('Yala is running. It may take several seconds...')
-        cmd = 'yala *.py tests/*.py tests/models/*.py'
-        check_call(cmd, shell=True)
+        try:
+            cmd = 'yala *.py tests/*.py tests/models/*.py'
+            check_call(cmd, shell=True)
+            print('No linter error found.')
+        except RuntimeError as error:
+            print('Linter check failed. Fix the error(s) above and try again.')
+            print(error)
+            exit(-1)
 
 
 class CITest(SimpleCommand):
@@ -109,13 +121,12 @@ class KytosInstall:
     @staticmethod
     def enable_core_napps():
         """Enable a NAPP by creating a symlink."""
-        # pylint: disable=no-member
         (ENABLED_PATH / 'kytos').mkdir(parents=True, exist_ok=True)
         for napp in CORE_NAPPS:
             napp_path = Path('kytos', napp)
             src = ENABLED_PATH / napp_path
             dst = INSTALLED_PATH / napp_path
-            src.symlink_to(dst)  # pylint: disable=no-member
+            symlink_if_different(src, dst)
 
 
 class InstallMode(install):
@@ -124,7 +135,7 @@ class InstallMode(install):
     description = 'To install NApps, use kytos-utils. Devs, see "develop".'
 
     def run(self):
-        """Create of_core as default napps enabled."""
+        """Direct users to use kytos-utils to install NApps."""
         print(self.description)
 
 
@@ -151,7 +162,7 @@ class DevelopMode(develop):
     created on the system aiming the current source code.
     """
 
-    description = 'install NApps in development mode'
+    description = 'Install NApps in development mode'
 
     def run(self):
         """Install the package in a developer mode."""
@@ -171,28 +182,40 @@ class DevelopMode(develop):
         var/lib/kytos/napps/.installed/kytos/napp_name.
         """
         links = INSTALLED_PATH / 'kytos'
-        links.mkdir(parents=True, exist_ok=True)  # pylint: disable=no-member
+        links.mkdir(parents=True, exist_ok=True)
         code = CURRENT_DIR
-        src = links / 'mef_eline'
-        src.symlink_to(code)  # pylint: disable=no-member
+        src = links / NAPP_NAME
+        symlink_if_different(src, code)
 
-        # pylint: disable=no-member
         (ENABLED_PATH / 'kytos').mkdir(parents=True, exist_ok=True)
-        dst = ENABLED_PATH / Path('kytos', 'mef_eline')
-        dst.symlink_to(src)  # pylint: disable=no-member
+        dst = ENABLED_PATH / Path('kytos', NAPP_NAME)
+        symlink_if_different(dst, src)
 
     @staticmethod
     def _create_file_symlinks():
         """Symlink to required files."""
         src = ENABLED_PATH / '__init__.py'
         dst = CURRENT_DIR / 'napps' / '__init__.py'
-        src.symlink_to(dst)  # pylint: disable=no-member
+        symlink_if_different(src, dst)
 
 
-setup(name='kytos_mef_eline',
-      version='2.3.1',
+def symlink_if_different(path, target):
+    """Force symlink creation if it points anywhere else."""
+    # print(f"symlinking {path} to target: {target}...", end=" ")
+    if not path.exists():
+        # print(f"path doesn't exist. linking...")
+        path.symlink_to(target)
+    elif not path.samefile(target):
+        # print(f"path exists, but is different. removing and linking...")
+        # Exists but points to a different file, so let's replace it
+        path.unlink()
+        path.symlink_to(target)
+
+
+setup(name=f'kytos_{NAPP_NAME}',
+      version=NAPP_VERSION,
       description='Core NApps developed by Kytos Team',
-      url='http://github.com/kytos/mef_eline',
+      url='http://github.com/kytos/{NAPP_NAME}',
       author='Kytos Team',
       author_email='of-ng-dev@ncc.unesp.br',
       license='MIT',

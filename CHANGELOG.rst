@@ -3,71 +3,72 @@ Changelog
 #########
 All notable changes to the MEF_ELine NApp will be documented in this file.
 
-[2.3.2] - 2019-06-12
+[UNRELEASED] - Under development
 ********************************
 Added
 =====
- - Added EVC status check when deploying using schedule.
- - Serialize circuit scheduler for storehouse.
- - Fix VLAN availability on interfaces after using them.
- - Documentation about delete method.
+- Added EVC status check when deploying using schedule.
+- Serialize circuit scheduler for storehouse.
+- Fix VLAN availability on interfaces after using them.
+- Documentation about delete method.
 
 Changed
 =======
-  - Updated coments on methods.
-  - Updated OpenApi Models description and documentation.
+- Updated comments on methods.
+- Updated OpenApi Models description and documentation.
 
 Deprecated
 ==========
 
 Removed
 =======
-  - Removed dependencies.
+- Removed dependencies.
 
 Fixed
 =====
-  - Linter issues
+- Linter issues
 
 Security
 ========
+
 
 [2.3.1] - 2019-03-15
 ********************
 
 Added
 =====
- - Scrutinizer running after every push to GitHub repository.
- - Linter checking all python code.
+- Scrutinizer running after every push to GitHub repository.
+- Linter checking all python code.
 
 Fixed
 =====
- - Fixed link up/down events from kytos/topology (#99 and #100).
- - Load VLANs from storehouse (#101).
- - Check path status using kytos/topology (#102).
- - Fixed tests to mock call to get links from kytos/topology (#118).
+- Fixed link up/down events from kytos/topology (#99 and #100).
+- Load VLANs from storehouse (#101).
+- Check path status using kytos/topology (#102).
+- Fixed tests to mock call to get links from kytos/topology (#118).
 
 [2.3.0] - 2018-12-14
 ********************
 
 Added
 =====
- - Added more API documentation.
- - Added EVC flow removal based on cookies.
- - Added EVC deletion API method.
+- Added more API documentation.
+- Added EVC flow removal based on cookies.
+- Added EVC deletion API method.
 
 Fixed
 =====
- - Fixed circuit not being deployed.
- - Fixed `current_path` changes not being saved on storehouse (#85).
- - Fixed storehouse always creating a new box (#91).
- - Fixed handling of link up/down events.
+- Fixed circuit not being deployed.
+- Fixed `current_path` changes not being saved on storehouse (#85).
+- Fixed storehouse always creating a new box (#91).
+- Fixed handling of link up/down events.
 
 [2.2.2] - 2018-10-15
 ********************
 
 Fixed
 =====
- - Fixed error when creating a circuit with scheduling and without `start_date`
+- Fixed error when creating a circuit with scheduling and without `start_date`
    (#79 and #80)
 
 [2.2.1] - 2018-09-06
@@ -117,7 +118,7 @@ Added
 
 Changed
 =======
-- Refactore main.py and models.py
+- Refactor main.py and models.py
 
 Fixed
 =====

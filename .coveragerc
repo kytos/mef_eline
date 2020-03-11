@@ -1,3 +1,6 @@
 [run]
 source = .
 omit = *tests*,.tox/*
+
+[xml]
+output=coverage.xml

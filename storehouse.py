@@ -82,7 +82,7 @@ class StoreHouse:
             log.error(f'Box {data.box_id} not found in {self.namespace}.')
 
         self.box = data
-        log.debug(f'Box {self.box.box_id} was load from storehouse.')
+        log.debug(f'Box {self.box.box_id} was loaded from storehouse.')
 
     def save_evc(self, evc):
         """Save a EVC using the storehouse."""
