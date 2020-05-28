@@ -21,6 +21,7 @@ py==1.6.0                 # via tox
 pycodestyle==2.4.0        # via yala
 pydocstyle==2.1.1         # via yala
 pylint==2.1.1             # via yala
+pytest==5.4.1             # via pytest
 six==1.11.0               # via astroid, pip-tools, pydocstyle, tox
 snowballstemmer==1.2.1    # via pydocstyle
 tox==3.2.1
