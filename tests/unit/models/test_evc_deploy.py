@@ -548,7 +548,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         evc.current_path = evc.primary_links
         evc.remove_current_flows()
 
-        self.assertEqual(send_flow_mods_mocked.call_count, 3)
+        self.assertEqual(send_flow_mods_mocked.call_count, 5)
         self.assertFalse(evc.is_active())
         flows = [{'cookie': evc.get_cookie(),
                  'cookie_mask': 18446744073709551615}]
