@@ -495,6 +495,8 @@ class EVCDeploy(EVCBase):
         """Remove all flows from current path."""
         switches = set()
 
+        switches.add(self.uni_a.interface.switch)
+        switches.add(self.uni_z.interface.switch)
         for link in self.current_path:
             switches.add(link.endpoint_a.switch)
             switches.add(link.endpoint_b.switch)
@@ -551,17 +553,51 @@ class EVCDeploy(EVCBase):
         self.remove_current_flows()
         if not self.should_deploy(path):
             path = self.discover_new_path()
-            if not path:
+            if path is None:
                 return False
 
-        path.choose_vlans()
-        self._install_nni_flows(path)
-        self._install_uni_flows(path)
+        if not path:
+            """This means that the discovered path does not leave the
+            switch, so there is no NNI, and the flows must "link" the
+            UNIs directly."""
+            self._install_direct_uni_flows()
+        else:
+            path.choose_vlans()
+            self._install_nni_flows(path)
+            self._install_uni_flows(path)
         self.activate()
         self.current_path = path
         self.sync()
         log.info(f"{self} was deployed.")
         return True
+
+    def _install_direct_uni_flows(self):
+        vlan_a = self.uni_a.user_tag.value if self.uni_a.user_tag else None
+        vlan_z = self.uni_z.user_tag.value if self.uni_z.user_tag else None
+
+        flow_mod_az = self._prepare_flow_mod(self.uni_a.interface, 
+                                             self.uni_z.interface)
+        flow_mod_za = self._prepare_flow_mod(self.uni_z.interface,
+                                             self.uni_a.interface)
+        
+        if vlan_a and vlan_z:
+            flow_mod_az['match']['dl_vlan'] = vlan_a
+            flow_mod_za['match']['dl_vlan'] = vlan_z
+            flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_z})
+            flow_mod_za['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_a})
+        elif vlan_a:
+            flow_mod_az['match']['dl_vlan'] = vlan_a
+            flow_mod_az['actions'].insert(0, {'action_type': 'pop_vlan'})
+            flow_mod_za['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_a})
+        elif vlan_a:
+            flow_mod_za['match']['dl_vlan'] = vlan_z
+            flow_mod_za['actions'].insert(0, {'action_type': 'pop_vlan'})
+            flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_z})
+        self._send_flow_mods(self.uni_a.interface.switch, [flow_mod_az, flow_mod_za])
 
     def _install_nni_flows(self, path=None):
         """Install NNI flows."""
