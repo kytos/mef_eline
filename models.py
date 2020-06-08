@@ -575,11 +575,11 @@ class EVCDeploy(EVCBase):
         vlan_a = self.uni_a.user_tag.value if self.uni_a.user_tag else None
         vlan_z = self.uni_z.user_tag.value if self.uni_z.user_tag else None
 
-        flow_mod_az = self._prepare_flow_mod(self.uni_a.interface, 
+        flow_mod_az = self._prepare_flow_mod(self.uni_a.interface,
                                              self.uni_z.interface)
         flow_mod_za = self._prepare_flow_mod(self.uni_z.interface,
                                              self.uni_a.interface)
-        
+
         if vlan_a and vlan_z:
             flow_mod_az['match']['dl_vlan'] = vlan_a
             flow_mod_za['match']['dl_vlan'] = vlan_z
@@ -597,7 +597,8 @@ class EVCDeploy(EVCBase):
             flow_mod_za['actions'].insert(0, {'action_type': 'pop_vlan'})
             flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
                                               'vlan_id': vlan_z})
-        self._send_flow_mods(self.uni_a.interface.switch, [flow_mod_az, flow_mod_za])
+        self._send_flow_mods(self.uni_a.interface.switch,
+                             [flow_mod_az, flow_mod_za])
 
     def _install_nni_flows(self, path=None):
         """Install NNI flows."""
