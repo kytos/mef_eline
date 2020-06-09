@@ -592,7 +592,7 @@ class EVCDeploy(EVCBase):
             flow_mod_az['actions'].insert(0, {'action_type': 'pop_vlan'})
             flow_mod_za['actions'].insert(0, {'action_type': 'set_vlan',
                                               'vlan_id': vlan_a})
-        elif vlan_a:
+        elif vlan_z:
             flow_mod_za['match']['dl_vlan'] = vlan_z
             flow_mod_za['actions'].insert(0, {'action_type': 'pop_vlan'})
             flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
