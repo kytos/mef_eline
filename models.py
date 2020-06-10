@@ -572,6 +572,11 @@ class EVCDeploy(EVCBase):
         return True
 
     def _install_direct_uni_flows(self):
+        """Install flows connecting two UNIs.
+
+        This case happens when the circuit is between UNIs in the
+        same switch.
+        """
         vlan_a = self.uni_a.user_tag.value if self.uni_a.user_tag else None
         vlan_z = self.uni_z.user_tag.value if self.uni_z.user_tag else None
 
