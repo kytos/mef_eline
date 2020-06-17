@@ -6,6 +6,7 @@ import requests
 
 from kytos.core import log
 from kytos.core.common import EntityStatus, GenericEntity
+from kytos.core.exceptions import KytosNoTagAvailableError
 from kytos.core.helpers import get_time, now
 from kytos.core.interface import UNI
 from kytos.core.link import Link
@@ -117,6 +118,12 @@ class DynamicPathManager:
         if paths:
             return cls.create_path(cls.get_paths(circuit)[0]['hops'])
         return None
+
+    @classmethod
+    def get_best_paths(cls, circuit):
+        """Return the best path available for a circuit, if exists."""
+        for path in cls.get_paths(circuit):
+            yield cls.create_path(path['hops'])
 
     @classmethod
     def create_path(cls, path):
@@ -368,9 +375,9 @@ class EVCDeploy(EVCBase):
     def create(self):
         """Create a EVC."""
 
-    def discover_new_path(self):
+    def discover_new_paths(self):
         """Discover a new path to satisfy this circuit and deploy."""
-        return DynamicPathManager.get_best_path(self)
+        return DynamicPathManager.get_best_paths(self)
 
     def change_path(self):
         """Change EVC path."""
@@ -549,19 +556,31 @@ class EVCDeploy(EVCBase):
 
         """
         self.remove_current_flows()
-        if not self.should_deploy(path):
-            path = self.discover_new_path()
-            if not path:
-                return False
+        use_path = path
+        if self.should_deploy(use_path):
+            try:
+                use_path.choose_vlans()
+            except KytosNoTagAvailableError:
+                use_path = None
+        else:
+            for use_path in self.discover_new_paths():
+                try:
+                    use_path.choose_vlans()
+                    break
+                except KytosNoTagAvailableError:
+                    pass
+            else:
+                use_path = None
 
-        path.choose_vlans()
-        self._install_nni_flows(path)
-        self._install_uni_flows(path)
-        self.activate()
-        self.current_path = path
-        self.sync()
-        log.info(f"{self} was deployed.")
-        return True
+        if use_path:
+            self._install_nni_flows(use_path)
+            self._install_uni_flows(use_path)
+            self.activate()
+            self.current_path = use_path
+            self.sync()
+            log.info(f"{self} was deployed.")
+            return True
+        return False
 
     def _install_nni_flows(self, path=None):
         """Install NNI flows."""

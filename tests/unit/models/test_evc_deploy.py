@@ -403,8 +403,8 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         self.assertTrue(deployed)
 
     @patch('napps.kytos.mef_eline.models.log')
-    @patch('napps.kytos.mef_eline.models.EVC.discover_new_path',
-           return_value=None)
+    @patch('napps.kytos.mef_eline.models.EVC.discover_new_paths',
+           return_value=[])
     @patch('napps.kytos.mef_eline.models.Path.choose_vlans')
     @patch('napps.kytos.mef_eline.models.EVC._install_nni_flows')
     @patch('napps.kytos.mef_eline.models.EVC._install_uni_flows')
@@ -416,8 +416,8 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         """Test if all methods is ignored when the should_deploy is false."""
         # pylint: disable=too-many-locals
         (sync_mock, should_deploy_mock, activate_mock, install_uni_flows_mock,
-         install_nni_flows, chose_vlans_mock,
-         discover_new_path, log_mock) = args
+         install_nni_flows, choose_vlans_mock,
+         discover_new_paths, log_mock) = args
 
         uni_a = get_uni_mocked(interface_port=2, tag_value=82,
                                switch_id="switch_uni_a",
@@ -444,12 +444,12 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         evc = EVC(**attributes)
         deployed = evc.deploy_to_path()
 
-        self.assertEqual(discover_new_path.call_count, 1)
+        self.assertEqual(discover_new_paths.call_count, 1)
         self.assertEqual(should_deploy_mock.call_count, 1)
         self.assertEqual(activate_mock.call_count, 0)
         self.assertEqual(install_uni_flows_mock.call_count, 0)
         self.assertEqual(install_nni_flows.call_count, 0)
-        self.assertEqual(chose_vlans_mock.call_count, 0)
+        self.assertEqual(choose_vlans_mock.call_count, 0)
         self.assertEqual(log_mock.info.call_count, 0)
         self.assertEqual(sync_mock.call_count, 1)
         self.assertFalse(deployed)
@@ -460,11 +460,11 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
     @patch('napps.kytos.mef_eline.models.EVC._install_uni_flows')
     @patch('napps.kytos.mef_eline.models.EVC.activate')
     @patch('napps.kytos.mef_eline.models.EVC.should_deploy')
-    @patch('napps.kytos.mef_eline.models.EVC.discover_new_path')
+    @patch('napps.kytos.mef_eline.models.EVC.discover_new_paths')
     def test_deploy_without_path_case1(self, *args):
         """Test if not path is found a dynamic path is used."""
         # pylint: disable=too-many-locals
-        (discover_new_path_mocked, should_deploy_mock, activate_mock,
+        (discover_new_paths_mocked, should_deploy_mock, activate_mock,
          install_uni_flows_mock, install_nni_flows, chose_vlans_mock,
          log_mock) = args
 
@@ -491,7 +491,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         ])
 
         evc = EVC(**attributes)
-        discover_new_path_mocked.return_value = dynamic_backup_path
+        discover_new_paths_mocked.return_value = [dynamic_backup_path]
 
         # storehouse initialization mock
         evc._storehouse.box = Mock()  # pylint: disable=protected-access
@@ -500,7 +500,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         deployed = evc.deploy_to_path()
 
         self.assertEqual(should_deploy_mock.call_count, 1)
-        self.assertEqual(discover_new_path_mocked.call_count, 1)
+        self.assertEqual(discover_new_paths_mocked.call_count, 1)
         self.assertEqual(activate_mock.call_count, 1)
         self.assertEqual(install_uni_flows_mock.call_count, 1)
         self.assertEqual(install_nni_flows.call_count, 1)
