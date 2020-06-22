@@ -687,26 +687,30 @@ class EVCDeploy(EVCBase):
         in_interface, out_interface, in_vlan, out_vlan, new_in_vlan = args
 
         flow_mod = self._prepare_flow_mod(in_interface, out_interface)
-        flow_mod['match']['dl_vlan'] = in_vlan
+        if in_vlan:
+            flow_mod['match']['dl_vlan'] = in_vlan
 
-        new_action = {"action_type": "set_vlan",
-                      "vlan_id": out_vlan}
+        new_action = {"action_type": "set_vlan", "vlan_id": out_vlan}
         flow_mod["actions"].insert(0, new_action)
 
-        new_action = {"action_type": "push_vlan",
-                      "tag_type": "s"}
+        new_action = {"action_type": "push_vlan", "tag_type": "s"}
         flow_mod["actions"].insert(0, new_action)
 
-        new_action = {"action_type": "set_vlan",
-                      "vlan_id": new_in_vlan}
-        flow_mod["actions"].insert(0, new_action)
-
+        if new_in_vlan:
+            new_action = {"action_type": "set_vlan", "vlan_id": new_in_vlan}
+            flow_mod["actions"].insert(0, new_action)
+            if not in_vlan:
+                new_action = {"action_type": "push_vlan", "tag_type": "c"}
+                flow_mod["actions"].insert(0, new_action)
+        elif in_vlan:
+            new_action = {"action_type": "pop_vlan"}
+            flow_mod["actions"].insert(0, new_action)
         return flow_mod
 
-    def _prepare_pop_flow(self, in_interface, out_interface, in_vlan):
+    def _prepare_pop_flow(self, in_interface, out_interface, out_vlan):
         """Prepare pop flow."""
         flow_mod = self._prepare_flow_mod(in_interface, out_interface)
-        flow_mod['match']['dl_vlan'] = in_vlan
+        flow_mod['match']['dl_vlan'] = out_vlan
         new_action = {"action_type": "pop_vlan"}
         flow_mod["actions"].insert(0, new_action)
         return flow_mod
