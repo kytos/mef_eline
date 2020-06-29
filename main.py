@@ -613,9 +613,6 @@ class Main(KytosNApp):
             tag = None
         else:
             tag = TAG.from_dict(tag_dict)
-            if tag is False:
-                raise ValueError(f'Could not instantiate tag from dict '
-                                 '{tag_dict}')
         uni = UNI(interface, tag)
 
         return uni
