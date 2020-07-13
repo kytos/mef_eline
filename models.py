@@ -121,7 +121,7 @@ class DynamicPathManager:
 
     @classmethod
     def get_best_paths(cls, circuit):
-        """Return the best path available for a circuit, if exists."""
+        """Return the best paths available for a circuit, if they exist."""
         for path in cls.get_paths(circuit):
             yield cls.create_path(path['hops'])
 
@@ -376,7 +376,7 @@ class EVCDeploy(EVCBase):
         """Create a EVC."""
 
     def discover_new_paths(self):
-        """Discover a new path to satisfy this circuit and deploy."""
+        """Discover new paths to satisfy this circuit and deploy it."""
         return DynamicPathManager.get_best_paths(self)
 
     def change_path(self):
