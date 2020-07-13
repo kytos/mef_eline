@@ -557,9 +557,9 @@ class EVCDeploy(EVCBase):
                 return False
 
         if not path:
-            """This means that the discovered path does not leave the
-            switch, so there is no NNI, and the flows must "link" the
-            UNIs directly."""
+            # This means that the discovered path does not leave the
+            # switch, so there is no NNI, and the flows must "link" the
+            # UNIs directly.
             self._install_direct_uni_flows()
         else:
             path.choose_vlans()
