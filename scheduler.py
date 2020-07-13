@@ -96,9 +96,7 @@ class Scheduler:
         elif circuit_scheduler.action == 'remove':
             job_call = circuit.remove
         else:
-            valid_actions = ("'create'", "'remove'")
-            raise ValueError(f'Scheduler action must be '
-                             f'{" or ".join(valid_actions)}')
+            raise ValueError("Scheduler action must be 'create' or 'remove'")
 
         data = {'id': circuit_scheduler.id}
         if circuit_scheduler.date:
