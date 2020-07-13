@@ -7,7 +7,7 @@ from kytos.core.interface import UNI, Interface
 from kytos.core.events import KytosEvent
 
 from napps.kytos.mef_eline.models import EVC
-from tests.helpers import get_controller_mock
+from tests.helpers import get_controller_mock, get_uni_mocked
 
 
 # pylint: disable=too-many-public-methods, too-many-lines
@@ -1107,7 +1107,9 @@ class TestMain(TestCase):
 
         for mock in mocks:
             mock.return_value = True
-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z', 'uni_a', 'uni_z']
+        unis = [get_uni_mocked(switch_dpid='00:00:00:00:00:00:00:01'),
+                get_uni_mocked(switch_dpid='00:00:00:00:00:00:00:02')]
+        uni_from_dict_mock.side_effect = 2 * unis
 
         api = self.get_app_test_client(self.napp)
         payloads = [

@@ -502,6 +502,8 @@ class EVCDeploy(EVCBase):
         """Remove all flows from current path."""
         switches = set()
 
+        switches.add(self.uni_a.interface.switch)
+        switches.add(self.uni_z.interface.switch)
         for link in self.current_path:
             switches.add(link.endpoint_a.switch)
             switches.add(link.endpoint_b.switch)
@@ -581,6 +583,40 @@ class EVCDeploy(EVCBase):
             log.info(f"{self} was deployed.")
             return True
         return False
+
+    def _install_direct_uni_flows(self):
+        """Install flows connecting two UNIs.
+
+        This case happens when the circuit is between UNIs in the
+        same switch.
+        """
+        vlan_a = self.uni_a.user_tag.value if self.uni_a.user_tag else None
+        vlan_z = self.uni_z.user_tag.value if self.uni_z.user_tag else None
+
+        flow_mod_az = self._prepare_flow_mod(self.uni_a.interface,
+                                             self.uni_z.interface)
+        flow_mod_za = self._prepare_flow_mod(self.uni_z.interface,
+                                             self.uni_a.interface)
+
+        if vlan_a and vlan_z:
+            flow_mod_az['match']['dl_vlan'] = vlan_a
+            flow_mod_za['match']['dl_vlan'] = vlan_z
+            flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_z})
+            flow_mod_za['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_a})
+        elif vlan_a:
+            flow_mod_az['match']['dl_vlan'] = vlan_a
+            flow_mod_az['actions'].insert(0, {'action_type': 'pop_vlan'})
+            flow_mod_za['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_a})
+        elif vlan_z:
+            flow_mod_za['match']['dl_vlan'] = vlan_z
+            flow_mod_za['actions'].insert(0, {'action_type': 'pop_vlan'})
+            flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_z})
+        self._send_flow_mods(self.uni_a.interface.switch,
+                             [flow_mod_az, flow_mod_za])
 
     def _install_nni_flows(self, path=None):
         """Install NNI flows."""
@@ -706,26 +742,37 @@ class EVCDeploy(EVCBase):
         in_interface, out_interface, in_vlan, out_vlan, new_in_vlan = args
 
         flow_mod = self._prepare_flow_mod(in_interface, out_interface)
-        flow_mod['match']['dl_vlan'] = in_vlan
 
-        new_action = {"action_type": "set_vlan",
-                      "vlan_id": out_vlan}
+        # the service tag must be always pushed
+        new_action = {"action_type": "set_vlan", "vlan_id": out_vlan}
         flow_mod["actions"].insert(0, new_action)
 
-        new_action = {"action_type": "push_vlan",
-                      "tag_type": "s"}
+        new_action = {"action_type": "push_vlan", "tag_type": "s"}
         flow_mod["actions"].insert(0, new_action)
 
-        new_action = {"action_type": "set_vlan",
-                      "vlan_id": new_in_vlan}
-        flow_mod["actions"].insert(0, new_action)
-
+        if in_vlan:
+            # if in_vlan is set, it must be included in the match
+            flow_mod['match']['dl_vlan'] = in_vlan
+        if new_in_vlan:
+            # new_in_vlan is set, so an action to set it is necessary
+            new_action = {"action_type": "set_vlan", "vlan_id": new_in_vlan}
+            flow_mod["actions"].insert(0, new_action)
+            if not in_vlan:
+                # new_in_vlan is set, but in_vlan is not, so there was no
+                # vlan set; then it is set now
+                new_action = {"action_type": "push_vlan", "tag_type": "c"}
+                flow_mod["actions"].insert(0, new_action)
+        elif in_vlan:
+            # in_vlan is set, but new_in_vlan is not, so the existing vlan
+            # must be removed
+            new_action = {"action_type": "pop_vlan"}
+            flow_mod["actions"].insert(0, new_action)
         return flow_mod
 
-    def _prepare_pop_flow(self, in_interface, out_interface, in_vlan):
+    def _prepare_pop_flow(self, in_interface, out_interface, out_vlan):
         """Prepare pop flow."""
         flow_mod = self._prepare_flow_mod(in_interface, out_interface)
-        flow_mod['match']['dl_vlan'] = in_vlan
+        flow_mod['match']['dl_vlan'] = out_vlan
         new_action = {"action_type": "pop_vlan"}
         flow_mod["actions"].insert(0, new_action)
         return flow_mod
