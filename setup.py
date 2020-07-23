@@ -198,7 +198,7 @@ class DevelopMode(develop):
 
 
 setup(name='kytos_mef_eline',
-      version='2.3.1',
+      version='2.4',
       description='Core NApps developed by Kytos Team',
       url='http://github.com/kytos/mef_eline',
       author='Kytos Team',
