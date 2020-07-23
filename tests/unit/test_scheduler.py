@@ -1,5 +1,5 @@
 """Module to test the schedule.py file."""
-from datetime import datetime
+import datetime
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -23,7 +23,7 @@ class TestCircuitSchedule(TestCase):
         time_fmt = "%Y-%m-%dT%H:%M:%S"
         options = {
             "action": "create",
-            "date": datetime.now().strftime(time_fmt)
+            "date": datetime.datetime.now().strftime(time_fmt)
         }
         circuit_schedule = CircuitSchedule(**options)
         self.assertEqual("create", circuit_schedule.action)
@@ -95,7 +95,7 @@ class TestScheduler(TestCase):
         scheduler_add_job_mock.return_value = True
         validate_mock.return_value = True
         time_fmt = "%Y-%m-%dT%H:%M:%S"
-        date = datetime.now().strftime(time_fmt)
+        date = datetime.datetime.now().strftime(time_fmt)
         circuit_scheduler = CircuitSchedule(action="remove", date=date)
         options = {"controller": get_controller_mock(),
                    "name": 'my evc1',
@@ -128,6 +128,7 @@ class TestScheduler(TestCase):
                    "name": 'my evc1',
                    "uni_a": 'uni_a',
                    "uni_z": 'uni_z',
+                   "start_date": "2019-08-09T19:25:06",
                    "circuit_scheduler": [circuit_scheduler]
                    }
         evc = EVC(**options)
@@ -137,6 +138,9 @@ class TestScheduler(TestCase):
             "id": circuit_scheduler.id,
             "hours": 2,
             "minutes": 3,
+            "end_date": None,
+            "start_date": datetime.datetime(
+                2019, 8, 9, 19, 25, 6, 0, tzinfo=datetime.timezone.utc)
         }
         scheduler_add_job_mock.assert_called_once_with(evc.deploy, 'interval',
                                                        **expected_parameters)
@@ -163,12 +167,16 @@ class TestScheduler(TestCase):
                    "name": 'my evc1',
                    "uni_a": 'uni_a',
                    "uni_z": 'uni_z',
+                   "start_date": "2019-08-09T19:25:06",
                    "circuit_scheduler": [circuit_scheduler]
                    }
         evc = EVC(**options)
         self.scheduler.add(evc)
         expected_parameters = {
-            "id": circuit_scheduler.id
+            "id": circuit_scheduler.id,
+            "end_date": None,
+            "start_date": datetime.datetime(
+                2019, 8, 9, 19, 25, 6, 0, tzinfo=datetime.timezone.utc)
         }
         scheduler_add_job_mock.assert_called_once_with(evc.deploy, trigger,
                                                        **expected_parameters)

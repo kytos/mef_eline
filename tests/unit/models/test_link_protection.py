@@ -124,8 +124,10 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
     # This method will be used by the mock to replace requests.get
     def _mocked_requests_get_path_down(self):
         # pylint: disable=no-self-use
-        return MockResponse({'links': {'abc': {'active': False},
-                                       'def': {'active': True}}}, 200)
+        return MockResponse({'links': {'abc': {'active': False,
+                                               'enabled': True},
+                                       'def': {'active': True,
+                                               'enabled': True}}}, 200)
 
     @patch('requests.get', side_effect=_mocked_requests_get_path_down)
     def test_deploy_to_case_3(self, requests_mocked):
@@ -297,13 +299,11 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
         log_mocked.debug.assert_called_once_with(msg)
 
     @patch('napps.kytos.mef_eline.models.log')
-    @patch('napps.kytos.mef_eline.models.EVCDeploy.deploy')
+    @patch('napps.kytos.mef_eline.models.EVCDeploy.deploy_to_path')
     @patch('napps.kytos.mef_eline.models.EVCDeploy._send_flow_mods')
-    @patch('napps.kytos.mef_eline.models.DynamicPathManager.get_best_path')
     @patch(DEPLOY_TO_PRIMARY_PATH)
     @patch('napps.kytos.mef_eline.models.Path.status', EntityStatus.DOWN)
     def test_handle_link_down_case_4(self, deploy_to_mocked,
-                                     get_best_path_mocked,
                                      _send_flow_mods_mocked,
                                      deploy_mocked,
                                      log_mocked):
@@ -345,8 +345,6 @@ class TestLinkProtection(TestCase):  # pylint: disable=too-many-public-methods
         evc._storehouse.box.data = {}  # pylint: disable=protected-access
 
         current_handle_link_down = evc.handle_link_down()
-
-        self.assertEqual(get_best_path_mocked.call_count, 1)
         self.assertEqual(deploy_to_mocked.call_count, 1)
 
         self.assertTrue(current_handle_link_down)

@@ -7,9 +7,6 @@ All notable changes to the MEF_ELine NApp will be documented in this file.
 ********************************
 Added
 =====
- - Added EVC status check when deploying using schedule.
- - Serialize circuit scheduler for storehouse.
- - Fix VLAN availability on interfaces after using them.
 
 Changed
 =======
@@ -26,43 +23,80 @@ Fixed
 Security
 ========
 
+
+[2.4] - 2020-07-23
+******************
+
+Added
+=====
+- Added EVC status check when deploying using schedule.
+- Serialize circuit scheduler for storehouse.
+- Fix VLAN availability on interfaces after using them.
+- Documentation about delete method.
+- Added '.travis.yml' to enable Travis CI.
+- Added tags decorator to run tests by type and size.
+- Install flows when UNIs are in the same switch.
+
+Changed
+=======
+- Updated HTTP return messages and codes when an error happens.
+- Accept EVCs where UNI has no tag.
+- Path status now return disabled state if any of its links is disabled.
+- Updated method to get the shortest path, now it returns more paths.
+- Changed enable/enabled to update _enabled attribute and activate/active to
+  update _active attribute.
+- Updated OpenApi Models description and documentation.
+
+Deprecated
+==========
+- Do not create a job when action is not ``create`` or ``remove``.
+
+Removed
+=======
+- Removed dependencies.
+
+Fixed
+=====
+- Fixed enable on update EVCs.
+
+
 [2.3.1] - 2019-03-15
 ********************
 
 Added
 =====
- - Scrutinizer running after every push to GitHub repository.
- - Linter checking all python code.
+- Scrutinizer running after every push to GitHub repository.
+- Linter checking all python code.
 
 Fixed
 =====
- - Fixed link up/down events from kytos/topology (#99 and #100).
- - Load VLANs from storehouse (#101).
- - Check path status using kytos/topology (#102).
- - Fixed tests to mock call to get links from kytos/topology (#118).
+- Fixed link up/down events from kytos/topology (#99 and #100).
+- Load VLANs from storehouse (#101).
+- Check path status using kytos/topology (#102).
+- Fixed tests to mock call to get links from kytos/topology (#118).
 
 [2.3.0] - 2018-12-14
 ********************
 
 Added
 =====
- - Added more API documentation.
- - Added EVC flow removal based on cookies.
- - Added EVC deletion API method.
+- Added more API documentation.
+- Added EVC flow removal based on cookies.
+- Added EVC deletion API method.
 
 Fixed
 =====
- - Fixed circuit not being deployed.
- - Fixed `current_path` changes not being saved on storehouse (#85).
- - Fixed storehouse always creating a new box (#91).
- - Fixed handling of link up/down events.
+- Fixed circuit not being deployed.
+- Fixed `current_path` changes not being saved on storehouse (#85).
+- Fixed storehouse always creating a new box (#91).
+- Fixed handling of link up/down events.
 
 [2.2.2] - 2018-10-15
 ********************
 
 Fixed
 =====
- - Fixed error when creating a circuit with scheduling and without `start_date`
+- Fixed error when creating a circuit with scheduling and without `start_date`
    (#79 and #80)
 
 [2.2.1] - 2018-09-06
@@ -112,7 +146,7 @@ Added
 
 Changed
 =======
-- Refactore main.py and models.py
+- Refactor main.py and models.py
 
 Fixed
 =====

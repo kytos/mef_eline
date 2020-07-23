@@ -182,30 +182,46 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         evc = EVC(**attributes)
         interface_a = evc.uni_a.interface
         interface_z = evc.uni_z.interface
-        in_vlan_a = 10
         out_vlan_a = 20
-        in_vlan_z = 3
 
-        # pylint: disable=protected-access
-        flow_mod = evc._prepare_push_flow(interface_a, interface_z,
-                                          in_vlan_a, out_vlan_a,
-                                          in_vlan_z)
+        for in_vlan_a in (10, None):
+            for in_vlan_z in (3, None):
+                with self.subTest(in_vlan_a=in_vlan_a, in_vlan_z=in_vlan_z):
+                    # pylint: disable=protected-access
+                    flow_mod = evc._prepare_push_flow(interface_a, interface_z,
+                                                      in_vlan_a, out_vlan_a,
+                                                      in_vlan_z)
 
-        expected_flow_mod = {
-            'match': {'in_port': interface_a.port_number,
-                      'dl_vlan': in_vlan_a
-                      },
-            'cookie': evc.get_cookie(),
-            'actions': [
-                        {'action_type': 'set_vlan', 'vlan_id': in_vlan_z},
-                        {'action_type': 'push_vlan', 'tag_type': 's'},
-                        {'action_type': 'set_vlan', 'vlan_id': out_vlan_a},
-                        {'action_type': 'output',
-                         'port': interface_z.port_number
-                         }
-            ]
-        }
-        self.assertEqual(expected_flow_mod, flow_mod)
+                    expected_flow_mod = {
+                        'match': {'in_port': interface_a.port_number},
+                        'cookie': evc.get_cookie(),
+                        'actions': [
+                            {'action_type': 'push_vlan', 'tag_type': 's'},
+                            {'action_type': 'set_vlan', 'vlan_id': out_vlan_a},
+                            {
+                                'action_type': 'output',
+                                'port': interface_z.port_number
+                            }
+                        ]
+                    }
+                    if in_vlan_a and in_vlan_z:
+                        expected_flow_mod['match']['dl_vlan'] = in_vlan_a
+                        expected_flow_mod['actions'].insert(0, {
+                            'action_type': 'set_vlan', 'vlan_id': in_vlan_z
+                        })
+                    elif in_vlan_a:
+                        expected_flow_mod['match']['dl_vlan'] = in_vlan_a
+                        expected_flow_mod['actions'].insert(0, {
+                            'action_type': 'pop_vlan'
+                        })
+                    elif in_vlan_z:
+                        expected_flow_mod['actions'].insert(0, {
+                            'action_type': 'set_vlan', 'vlan_id': in_vlan_z
+                        })
+                        expected_flow_mod['actions'].insert(0, {
+                            'action_type': 'push_vlan', 'tag_type': 'c'
+                        })
+                    self.assertEqual(expected_flow_mod, flow_mod)
 
     @staticmethod
     @patch('napps.kytos.mef_eline.models.EVC._send_flow_mods')
@@ -403,8 +419,8 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         self.assertTrue(deployed)
 
     @patch('napps.kytos.mef_eline.models.log')
-    @patch('napps.kytos.mef_eline.models.EVC.discover_new_path',
-           return_value=None)
+    @patch('napps.kytos.mef_eline.models.EVC.discover_new_paths',
+           return_value=[])
     @patch('napps.kytos.mef_eline.models.Path.choose_vlans')
     @patch('napps.kytos.mef_eline.models.EVC._install_nni_flows')
     @patch('napps.kytos.mef_eline.models.EVC._install_uni_flows')
@@ -416,8 +432,8 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         """Test if all methods is ignored when the should_deploy is false."""
         # pylint: disable=too-many-locals
         (sync_mock, should_deploy_mock, activate_mock, install_uni_flows_mock,
-         install_nni_flows, chose_vlans_mock,
-         discover_new_path, log_mock) = args
+         install_nni_flows, choose_vlans_mock,
+         discover_new_paths, log_mock) = args
 
         uni_a = get_uni_mocked(interface_port=2, tag_value=82,
                                switch_id="switch_uni_a",
@@ -444,12 +460,12 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         evc = EVC(**attributes)
         deployed = evc.deploy_to_path()
 
-        self.assertEqual(discover_new_path.call_count, 1)
+        self.assertEqual(discover_new_paths.call_count, 1)
         self.assertEqual(should_deploy_mock.call_count, 1)
         self.assertEqual(activate_mock.call_count, 0)
         self.assertEqual(install_uni_flows_mock.call_count, 0)
         self.assertEqual(install_nni_flows.call_count, 0)
-        self.assertEqual(chose_vlans_mock.call_count, 0)
+        self.assertEqual(choose_vlans_mock.call_count, 0)
         self.assertEqual(log_mock.info.call_count, 0)
         self.assertEqual(sync_mock.call_count, 1)
         self.assertFalse(deployed)
@@ -460,11 +476,11 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
     @patch('napps.kytos.mef_eline.models.EVC._install_uni_flows')
     @patch('napps.kytos.mef_eline.models.EVC.activate')
     @patch('napps.kytos.mef_eline.models.EVC.should_deploy')
-    @patch('napps.kytos.mef_eline.models.EVC.discover_new_path')
+    @patch('napps.kytos.mef_eline.models.EVC.discover_new_paths')
     def test_deploy_without_path_case1(self, *args):
         """Test if not path is found a dynamic path is used."""
         # pylint: disable=too-many-locals
-        (discover_new_path_mocked, should_deploy_mock, activate_mock,
+        (discover_new_paths_mocked, should_deploy_mock, activate_mock,
          install_uni_flows_mock, install_nni_flows, chose_vlans_mock,
          log_mock) = args
 
@@ -491,7 +507,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         ])
 
         evc = EVC(**attributes)
-        discover_new_path_mocked.return_value = dynamic_backup_path
+        discover_new_paths_mocked.return_value = [dynamic_backup_path]
 
         # storehouse initialization mock
         evc._storehouse.box = Mock()  # pylint: disable=protected-access
@@ -500,7 +516,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         deployed = evc.deploy_to_path()
 
         self.assertEqual(should_deploy_mock.call_count, 1)
-        self.assertEqual(discover_new_path_mocked.call_count, 1)
+        self.assertEqual(discover_new_paths_mocked.call_count, 1)
         self.assertEqual(activate_mock.call_count, 1)
         self.assertEqual(install_uni_flows_mock.call_count, 1)
         self.assertEqual(install_nni_flows.call_count, 1)
@@ -548,7 +564,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         evc.current_path = evc.primary_links
         evc.remove_current_flows()
 
-        self.assertEqual(send_flow_mods_mocked.call_count, 3)
+        self.assertEqual(send_flow_mods_mocked.call_count, 5)
         self.assertFalse(evc.is_active())
         flows = [{'cookie': evc.get_cookie(),
                  'cookie_mask': 18446744073709551615}]

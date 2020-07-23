@@ -1,12 +1,13 @@
 """Module to test the main napp file."""
 import json
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, PropertyMock, patch, create_autospec, call
 
 from kytos.core.interface import UNI, Interface
+from kytos.core.events import KytosEvent
 
-from napps.kytos.mef_eline.main import Main
-from tests.helpers import get_controller_mock
+from napps.kytos.mef_eline.models import EVC
+from tests.helpers import get_controller_mock, get_uni_mocked
 
 
 # pylint: disable=too-many-public-methods, too-many-lines
@@ -19,6 +20,15 @@ class TestMain(TestCase):
         Set the server_name_url_url from kytos/mef_eline
         """
         self.server_name_url = 'http://localhost:8181/api/kytos/mef_eline'
+
+        # The decorator run_on_thread is patched, so methods that listen
+        # for events do not run on threads while tested.
+        # Decorators have to be patched before the methods that are
+        # decorated with them are imported.
+        patch('kytos.core.helpers.run_on_thread', lambda x: x).start()
+        from napps.kytos.mef_eline.main import Main
+
+        self.addCleanup(patch.stopall)
         self.napp = Main(get_controller_mock())
 
     def test_get_event_listeners(self):
@@ -288,8 +298,9 @@ class TestMain(TestCase):
         api = self.get_app_test_client(self.napp)
         url = f'{self.server_name_url}/v2/evc/3'
         response = api.get(url)
-        expected_result = {'response': 'circuit_id 3 not found'}
-        self.assertEqual(json.loads(response.data), expected_result)
+        expected_result = 'circuit_id 3 not found'
+        self.assertEqual(json.loads(response.data)['description'],
+                         expected_result)
 
     @patch('napps.kytos.mef_eline.storehouse.StoreHouse.get_data')
     @patch('napps.kytos.mef_eline.scheduler.Scheduler.add')
@@ -395,10 +406,10 @@ class TestMain(TestCase):
 
         response = api.post(url)
         current_data = json.loads(response.data)
-        expected_data = 'Bad request: The request do not have a json.'
+        expected_data = 'The request body mimetype is not application/json.'
 
-        self.assertEqual(400, response.status_code, response.data)
-        self.assertEqual(current_data, expected_data)
+        self.assertEqual(415, response.status_code, response.data)
+        self.assertEqual(current_data['description'], expected_data)
 
     @patch('napps.kytos.mef_eline.scheduler.Scheduler.add')
     @patch('napps.kytos.mef_eline.main.Main._uni_from_dict')
@@ -451,8 +462,8 @@ class TestMain(TestCase):
                             data=json.dumps(payload2),
                             content_type='application/json')
         current_data = json.loads(response.data)
-        expected_data = 'Not Acceptable: This evc already exists.'
-        self.assertEqual(current_data, expected_data)
+        expected_data = 'The EVC already exists.'
+        self.assertEqual(current_data['description'], expected_data)
         self.assertEqual(409, response.status_code)
 
     def test_load_circuits_by_interface(self):
@@ -816,10 +827,10 @@ class TestMain(TestCase):
         # Call URL
         response = api.get(url)
 
-        expected = {'response': 'circuit_id blah not found'}
+        expected = 'circuit_id blah not found'
         # Assert response not found
         self.assertEqual(response.status_code, 404, response.data)
-        self.assertEqual(expected, json.loads(response.data))
+        self.assertEqual(expected, json.loads(response.data)['description'])
 
     def _uni_from_dict_side_effect(self, uni_dict):
         interface_id = uni_dict.get("interface_id")
@@ -1097,7 +1108,9 @@ class TestMain(TestCase):
 
         for mock in mocks:
             mock.return_value = True
-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z', 'uni_a', 'uni_z']
+        unis = [get_uni_mocked(switch_dpid='00:00:00:00:00:00:00:01'),
+                get_uni_mocked(switch_dpid='00:00:00:00:00:00:00:02')]
+        uni_from_dict_mock.side_effect = 2 * unis
 
         api = self.get_app_test_client(self.napp)
         payloads = [
@@ -1129,6 +1142,9 @@ class TestMain(TestCase):
             },
             {
                 "priority": 3
+            },
+            {
+                "enable": True
             }
         ]
 
@@ -1156,13 +1172,35 @@ class TestMain(TestCase):
         evc_deploy.assert_not_called()
         self.assertEqual(200, response.status_code)
 
+        evc_deploy.reset_mock()
+        response = api.patch(f'{self.server_name_url}/v2/evc/{circuit_id}',
+                             data='{"priority":5,}',
+                             content_type='application/json')
+        evc_deploy.assert_not_called()
+        self.assertEqual(400, response.status_code)
+
+        evc_deploy.reset_mock()
+        response = api.patch(f'{self.server_name_url}/v2/evc/{circuit_id}',
+                             data=json.dumps(payloads[3]),
+                             content_type='application/json')
+        evc_deploy.assert_called_once()
+        self.assertEqual(200, response.status_code)
+
         response = api.patch(f'{self.server_name_url}/v2/evc/1234',
                              data=json.dumps(payloads[1]),
                              content_type='application/json')
         current_data = json.loads(response.data)
         expected_data = f'circuit_id 1234 not found'
-        self.assertEqual(current_data['response'], expected_data)
+        self.assertEqual(current_data['description'], expected_data)
         self.assertEqual(404, response.status_code)
+
+        api.delete(f'{self.server_name_url}/v2/evc/{circuit_id}')
+        evc_deploy.reset_mock()
+        response = api.patch(f'{self.server_name_url}/v2/evc/{circuit_id}',
+                             data=json.dumps(payloads[1]),
+                             content_type='application/json')
+        evc_deploy.assert_not_called()
+        self.assertEqual(405, response.status_code)
 
     @patch('napps.kytos.mef_eline.scheduler.Scheduler.add')
     @patch('napps.kytos.mef_eline.main.Main._uni_from_dict')
@@ -1215,6 +1253,29 @@ class TestMain(TestCase):
                              data=payload2,
                              content_type='application/json')
         current_data = json.loads(response.data)
-        expected_data = f'Bad Request: The request is not a valid JSON.'
-        self.assertEqual(current_data['response'], expected_data)
+        expected_data = 'The request body is not a well-formed JSON.'
+        self.assertEqual(current_data['description'], expected_data)
         self.assertEqual(400, response.status_code)
+
+    def test_handle_link_up(self):
+        """Test handle_link_up method."""
+        evc_mock = create_autospec(EVC)
+        evc_mock.is_enabled = MagicMock(side_effect=[True, False, True])
+        type(evc_mock).archived = \
+            PropertyMock(side_effect=[True, False, False])
+        evcs = [evc_mock, evc_mock, evc_mock]
+        event = KytosEvent(name='test', content={'link': 'abc'})
+        self.napp.circuits = dict(zip(['1', '2', '3'], evcs))
+        self.napp.handle_link_up(event)
+        evc_mock.handle_link_up.assert_called_once_with('abc')
+
+    def test_handle_link_down(self):
+        """Test handle_link_down method."""
+        evc_mock = create_autospec(EVC)
+        evc_mock.is_affected_by_link = \
+            MagicMock(side_effect=[True, False, True])
+        evcs = [evc_mock, evc_mock, evc_mock]
+        event = KytosEvent(name='test', content={'link': 'abc'})
+        self.napp.circuits = dict(zip(['1', '2', '3'], evcs))
+        self.napp.handle_link_down(event)
+        evc_mock.handle_link_down.assert_has_calls([call(), call()])

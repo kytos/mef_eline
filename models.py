@@ -6,6 +6,7 @@ import requests
 
 from kytos.core import log
 from kytos.core.common import EntityStatus, GenericEntity
+from kytos.core.exceptions import KytosNoTagAvailableError
 from kytos.core.helpers import get_time, now
 from kytos.core.interface import UNI
 from kytos.core.link import Link
@@ -66,14 +67,17 @@ class Path(list, GenericEntity):
                       endpoint, api_reply.status_code)
             return None
         links = api_reply.json()['links']
+        return_status = EntityStatus.UP
         for path_link in self:
             try:
                 link = links[path_link.id]
             except KeyError:
-                return EntityStatus.DOWN
+                return EntityStatus.DISABLED
+            if link['enabled'] is False:
+                return EntityStatus.DISABLED
             if link['active'] is False:
-                return EntityStatus.DOWN
-        return EntityStatus.UP
+                return_status = EntityStatus.DOWN
+        return return_status
 
     def as_dict(self):
         """Return list comprehension of links as_dict."""
@@ -117,6 +121,12 @@ class DynamicPathManager:
         if paths:
             return cls.create_path(cls.get_paths(circuit)[0]['hops'])
         return None
+
+    @classmethod
+    def get_best_paths(cls, circuit):
+        """Return the best paths available for a circuit, if they exist."""
+        for path in cls.get_paths(circuit):
+            yield cls.create_path(path['hops'])
 
     @classmethod
     def create_path(cls, path):
@@ -252,11 +262,21 @@ class EVCBase(GenericEntity):
             if attribute in self.unique_attributes:
                 raise ValueError(f'{attribute} can\'t be be updated.')
             if hasattr(self, attribute):
-                setattr(self, attribute, value)
-                if 'enable' in attribute:
+                if attribute in ('enable', 'enabled'):
+                    if value:
+                        self.enable()
+                    else:
+                        self.disable()
                     enable = value
-                elif 'path' in attribute:
-                    path = value
+                elif attribute in ('active', 'activate'):
+                    if value:
+                        self.activate()
+                    else:
+                        self.deactivate()
+                else:
+                    setattr(self, attribute, value)
+                    if 'path' in attribute:
+                        path = value
             else:
                 raise ValueError(f'The attribute "{attribute}" is invalid.')
         self.sync()
@@ -368,9 +388,9 @@ class EVCDeploy(EVCBase):
     def create(self):
         """Create a EVC."""
 
-    def discover_new_path(self):
-        """Discover a new path to satisfy this circuit and deploy."""
-        return DynamicPathManager.get_best_path(self)
+    def discover_new_paths(self):
+        """Discover new paths to satisfy this circuit and deploy it."""
+        return DynamicPathManager.get_best_paths(self)
 
     def change_path(self):
         """Change EVC path."""
@@ -495,6 +515,8 @@ class EVCDeploy(EVCBase):
         """Remove all flows from current path."""
         switches = set()
 
+        switches.add(self.uni_a.interface.switch)
+        switches.add(self.uni_z.interface.switch)
         for link in self.current_path:
             switches.add(link.endpoint_a.switch)
             switches.add(link.endpoint_b.switch)
@@ -549,19 +571,65 @@ class EVCDeploy(EVCBase):
 
         """
         self.remove_current_flows()
-        if not self.should_deploy(path):
-            path = self.discover_new_path()
-            if not path:
-                return False
+        use_path = path
+        if self.should_deploy(use_path):
+            try:
+                use_path.choose_vlans()
+            except KytosNoTagAvailableError:
+                use_path = None
+        else:
+            for use_path in self.discover_new_paths():
+                try:
+                    use_path.choose_vlans()
+                    break
+                except KytosNoTagAvailableError:
+                    pass
+            else:
+                use_path = None
 
-        path.choose_vlans()
-        self._install_nni_flows(path)
-        self._install_uni_flows(path)
-        self.activate()
-        self.current_path = path
-        self.sync()
-        log.info(f"{self} was deployed.")
-        return True
+        if use_path:
+            self._install_nni_flows(use_path)
+            self._install_uni_flows(use_path)
+            self.activate()
+            self.current_path = use_path
+            self.sync()
+            log.info(f"{self} was deployed.")
+            return True
+        return False
+
+    def _install_direct_uni_flows(self):
+        """Install flows connecting two UNIs.
+
+        This case happens when the circuit is between UNIs in the
+        same switch.
+        """
+        vlan_a = self.uni_a.user_tag.value if self.uni_a.user_tag else None
+        vlan_z = self.uni_z.user_tag.value if self.uni_z.user_tag else None
+
+        flow_mod_az = self._prepare_flow_mod(self.uni_a.interface,
+                                             self.uni_z.interface)
+        flow_mod_za = self._prepare_flow_mod(self.uni_z.interface,
+                                             self.uni_a.interface)
+
+        if vlan_a and vlan_z:
+            flow_mod_az['match']['dl_vlan'] = vlan_a
+            flow_mod_za['match']['dl_vlan'] = vlan_z
+            flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_z})
+            flow_mod_za['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_a})
+        elif vlan_a:
+            flow_mod_az['match']['dl_vlan'] = vlan_a
+            flow_mod_az['actions'].insert(0, {'action_type': 'pop_vlan'})
+            flow_mod_za['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_a})
+        elif vlan_z:
+            flow_mod_za['match']['dl_vlan'] = vlan_z
+            flow_mod_za['actions'].insert(0, {'action_type': 'pop_vlan'})
+            flow_mod_az['actions'].insert(0, {'action_type': 'set_vlan',
+                                              'vlan_id': vlan_z})
+        self._send_flow_mods(self.uni_a.interface.switch,
+                             [flow_mod_az, flow_mod_za])
 
     def _install_nni_flows(self, path=None):
         """Install NNI flows."""
@@ -687,26 +755,37 @@ class EVCDeploy(EVCBase):
         in_interface, out_interface, in_vlan, out_vlan, new_in_vlan = args
 
         flow_mod = self._prepare_flow_mod(in_interface, out_interface)
-        flow_mod['match']['dl_vlan'] = in_vlan
 
-        new_action = {"action_type": "set_vlan",
-                      "vlan_id": out_vlan}
+        # the service tag must be always pushed
+        new_action = {"action_type": "set_vlan", "vlan_id": out_vlan}
         flow_mod["actions"].insert(0, new_action)
 
-        new_action = {"action_type": "push_vlan",
-                      "tag_type": "s"}
+        new_action = {"action_type": "push_vlan", "tag_type": "s"}
         flow_mod["actions"].insert(0, new_action)
 
-        new_action = {"action_type": "set_vlan",
-                      "vlan_id": new_in_vlan}
-        flow_mod["actions"].insert(0, new_action)
-
+        if in_vlan:
+            # if in_vlan is set, it must be included in the match
+            flow_mod['match']['dl_vlan'] = in_vlan
+        if new_in_vlan:
+            # new_in_vlan is set, so an action to set it is necessary
+            new_action = {"action_type": "set_vlan", "vlan_id": new_in_vlan}
+            flow_mod["actions"].insert(0, new_action)
+            if not in_vlan:
+                # new_in_vlan is set, but in_vlan is not, so there was no
+                # vlan set; then it is set now
+                new_action = {"action_type": "push_vlan", "tag_type": "c"}
+                flow_mod["actions"].insert(0, new_action)
+        elif in_vlan:
+            # in_vlan is set, but new_in_vlan is not, so the existing vlan
+            # must be removed
+            new_action = {"action_type": "pop_vlan"}
+            flow_mod["actions"].insert(0, new_action)
         return flow_mod
 
-    def _prepare_pop_flow(self, in_interface, out_interface, in_vlan):
+    def _prepare_pop_flow(self, in_interface, out_interface, out_vlan):
         """Prepare pop flow."""
         flow_mod = self._prepare_flow_mod(in_interface, out_interface)
-        flow_mod['match']['dl_vlan'] = in_vlan
+        flow_mod['match']['dl_vlan'] = out_vlan
         new_action = {"action_type": "pop_vlan"}
         flow_mod["actions"].insert(0, new_action)
         return flow_mod

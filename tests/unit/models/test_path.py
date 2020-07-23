@@ -23,8 +23,10 @@ class TestPath(TestCase):
     # This method will be used by the mock to replace requests.get
     def _mocked_requests_get_status_case_2(self):
         # pylint: disable=no-self-use
-        return MockResponse({'links': {'abc': {'active': False},
-                                       'def': {'active': True}}}, 200)
+        return MockResponse({'links': {'abc': {'active': False,
+                                               'enabled': True},
+                                       'def': {'active': True,
+                                               'enabled': True}}}, 200)
 
     @patch('requests.get', side_effect=_mocked_requests_get_status_case_2)
     def test_status_case_2(self, requests_mocked):
@@ -47,8 +49,10 @@ class TestPath(TestCase):
     # This method will be used by the mock to replace requests.get
     def _mocked_requests_get_status_case_4(self):
         # pylint: disable=no-self-use
-        return MockResponse({'links': {'abc': {'active': True},
-                                       'def': {'active': True}}}, 200)
+        return MockResponse({'links': {'abc': {'active': True,
+                                               'enabled': True},
+                                       'def': {'active': True,
+                                               'enabled': True}}}, 200)
 
     @patch('requests.get', side_effect=_mocked_requests_get_status_case_4)
     def test_status_case_4(self, requests_mocked):
@@ -61,6 +65,46 @@ class TestPath(TestCase):
         links = [link1, link2]
         current_path = Path(links)
         self.assertEqual(current_path.status, EntityStatus.UP)
+
+    # This method will be used by the mock to replace requests.get
+    def _mocked_requests_get_status_case_5(self):
+        # pylint: disable=no-self-use
+        return MockResponse({'links': {'abc': {'active': True,
+                                               'enabled': True},
+                                       'def': {'active': False,
+                                               'enabled': False}}}, 200)
+
+    @patch('requests.get', side_effect=_mocked_requests_get_status_case_5)
+    def test_status_case_5(self, requests_mocked):
+        # pylint: disable=unused-argument
+        """Test if link status is UP."""
+        link1 = get_link_mocked()
+        link2 = get_link_mocked()
+        link1.id = 'def'
+        link2.id = 'abc'
+        links = [link1, link2]
+        current_path = Path(links)
+        self.assertEqual(current_path.status, EntityStatus.DISABLED)
+
+    # This method will be used by the mock to replace requests.get
+    def _mocked_requests_get_status_case_6(self):
+        # pylint: disable=no-self-use
+        return MockResponse({'links': {'abc': {'active': False,
+                                               'enabled': False},
+                                       'def': {'active': False,
+                                               'enabled': True}}}, 200)
+
+    @patch('requests.get', side_effect=_mocked_requests_get_status_case_6)
+    def test_status_case_6(self, requests_mocked):
+        # pylint: disable=unused-argument
+        """Test if link status is UP."""
+        link1 = get_link_mocked()
+        link2 = get_link_mocked()
+        link1.id = 'def'
+        link2.id = 'abc'
+        links = [link1, link2]
+        current_path = Path(links)
+        self.assertEqual(current_path.status, EntityStatus.DISABLED)
 
     def test_compare_same_paths(self):
         """Test compare paths with same links."""

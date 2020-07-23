@@ -1,6 +1,6 @@
 """Setup script.
 
-Run "python3 setup --help-commands" to list all available commands and their
+Run "python3 setup.py --help-commands" to list all available commands and their
 descriptions.
 """
 import os
@@ -8,7 +8,7 @@ import shutil
 import sys
 from abc import abstractmethod
 from pathlib import Path
-from subprocess import call, check_call
+from subprocess import CalledProcessError, call, check_call
 
 from setuptools import Command, setup
 from setuptools.command.develop import develop
@@ -19,10 +19,10 @@ if 'bdist_wheel' in sys.argv:
     raise RuntimeError("This setup.py does not support wheels")
 
 # Paths setup with virtualenv detection
-if 'VIRTUAL_ENV' in os.environ:
-    BASE_ENV = Path(os.environ['VIRTUAL_ENV'])
-else:
-    BASE_ENV = Path('/')
+BASE_ENV = Path(os.environ.get('VIRTUAL_ENV', '/'))
+
+NAPP_NAME = 'mef_eline'
+NAPP_VERSION = '2.4'
 
 # Kytos var folder
 VAR_PATH = BASE_ENV / 'var' / 'lib' / 'kytos'
@@ -55,6 +55,39 @@ class SimpleCommand(Command):
         """Post-process options."""
 
 
+# pylint: disable=attribute-defined-outside-init, abstract-method
+class TestCommand(Command):
+    """Test tags decorators."""
+
+    user_options = [
+        ('size=', None, 'Specify the size of tests to be executed.'),
+        ('type=', None, 'Specify the type of tests to be executed.'),
+    ]
+
+    sizes = ('small', 'medium', 'large', 'all')
+    types = ('unit', 'integration', 'e2e')
+
+    def get_args(self):
+        """Return args to be used in test command."""
+        return '--size %s --type %s' % (self.size, self.type)
+
+    def initialize_options(self):
+        """Set default size and type args."""
+        self.size = 'all'
+        self.type = 'unit'
+
+    def finalize_options(self):
+        """Post-process."""
+        try:
+            assert self.size in self.sizes, ('ERROR: Invalid size:'
+                                             f':{self.size}')
+            assert self.type in self.types, ('ERROR: Invalid type:'
+                                             f':{self.type}')
+        except AssertionError as exc:
+            print(exc)
+            sys.exit(-1)
+
+
 class Cleaner(SimpleCommand):
     """Custom clean command to tidy up the project root."""
 
@@ -67,16 +100,41 @@ class Cleaner(SimpleCommand):
         call('make -C docs/ clean', shell=True)
 
 
-class TestCoverage(SimpleCommand):
-    """Display test coverage."""
+class Test(TestCommand):
+    """Run all tests."""
 
-    description = 'run unit tests and display code coverage'
+    description = 'run tests and display results'
+
+    def get_args(self):
+        """Return args to be used in test command."""
+        markers = self.size
+        if markers == "small":
+            markers = 'not medium and not large'
+        size_args = "" if self.size == "all" else "-m '%s'" % markers
+        return '--addopts="tests/%s %s"' % (self.type, size_args)
 
     def run(self):
-        """Run unittest quietly and display coverage report."""
-        call('rm .coverage coverage.xml', shell=True)
-        call('coverage3 run -m unittest', shell=True)
-        call('coverage3 report && coverage3 xml', shell=True)
+        """Run tests."""
+        cmd = 'python setup.py pytest %s' % self.get_args()
+        try:
+            check_call(cmd, shell=True)
+        except CalledProcessError as exc:
+            print(exc)
+
+
+class TestCoverage(Test):
+    """Display test coverage."""
+
+    description = 'run tests and display code coverage'
+
+    def run(self):
+        """Run tests quietly and display coverage report."""
+        cmd = 'coverage3 run setup.py pytest %s' % self.get_args()
+        cmd += '&& coverage3 report'
+        try:
+            check_call(cmd, shell=True)
+        except CalledProcessError as exc:
+            print(exc)
 
 
 class Linter(SimpleCommand):
@@ -85,22 +143,28 @@ class Linter(SimpleCommand):
     description = 'lint Python source code'
 
     def run(self):
-        """Run yala."""
+        """Run Yala."""
         print('Yala is running. It may take several seconds...')
-        cmd = 'yala *.py tests/*.py tests/models/*.py'
-        check_call(cmd, shell=True)
+        try:
+            cmd = 'yala *.py tests'
+            check_call(cmd, shell=True)
+            print('No linter error found.')
+        except RuntimeError as error:
+            print('Linter check failed. Fix the error(s) above and try again.')
+            print(error)
+            exit(-1)
 
 
-class CITest(SimpleCommand):
+class CITest(TestCommand):
     """Run all CI tests."""
 
     description = 'run all CI tests: unit and doc tests, linter'
 
     def run(self):
         """Run unit tests with coverage, doc tests and linter."""
-        cmds = ['python3.6 setup.py ' + cmd
-                for cmd in ('coverage', 'lint')]
-        cmd = ' && '.join(cmds)
+        coverage_cmd = 'python3.6 setup.py coverage %s' % self.get_args()
+        lint_cmd = 'python3.6 setup.py lint'
+        cmd = '%s && %s' % (coverage_cmd, lint_cmd)
         check_call(cmd, shell=True)
 
 
@@ -110,15 +174,12 @@ class KytosInstall:
     @staticmethod
     def enable_core_napps():
         """Enable a NAPP by creating a symlink."""
-        # pylint: disable=no-member
         (ENABLED_PATH / 'kytos').mkdir(parents=True, exist_ok=True)
         for napp in CORE_NAPPS:
             napp_path = Path('kytos', napp)
             src = ENABLED_PATH / napp_path
             dst = INSTALLED_PATH / napp_path
-            if os.path.islink(src):
-                src.unlink()
-            src.symlink_to(dst)  # pylint: disable=no-member
+            symlink_if_different(src, dst)
 
 
 class InstallMode(install):
@@ -127,7 +188,7 @@ class InstallMode(install):
     description = 'To install NApps, use kytos-utils. Devs, see "develop".'
 
     def run(self):
-        """Create of_core as default napps enabled."""
+        """Direct users to use kytos-utils to install NApps."""
         print(self.description)
 
 
@@ -154,7 +215,7 @@ class DevelopMode(develop):
     created on the system aiming the current source code.
     """
 
-    description = 'install NApps in development mode'
+    description = 'Install NApps in development mode'
 
     def run(self):
         """Install the package in a developer mode."""
@@ -174,37 +235,46 @@ class DevelopMode(develop):
         var/lib/kytos/napps/.installed/kytos/napp_name.
         """
         links = INSTALLED_PATH / 'kytos'
-        links.mkdir(parents=True, exist_ok=True)  # pylint: disable=no-member
+        links.mkdir(parents=True, exist_ok=True)
         code = CURRENT_DIR
-        src = links / 'mef_eline'
-        if os.path.islink(src):
-            src.unlink()
-        src.symlink_to(code)  # pylint: disable=no-member
+        src = links / NAPP_NAME
+        symlink_if_different(src, code)
 
-        # pylint: disable=no-member
         (ENABLED_PATH / 'kytos').mkdir(parents=True, exist_ok=True)
-        dst = ENABLED_PATH / Path('kytos', 'mef_eline')
-        if os.path.islink(dst):
-            dst.unlink()
-        dst.symlink_to(src)  # pylint: disable=no-member
+        dst = ENABLED_PATH / Path('kytos', NAPP_NAME)
+        symlink_if_different(dst, src)
 
     @staticmethod
     def _create_file_symlinks():
         """Symlink to required files."""
         src = ENABLED_PATH / '__init__.py'
         dst = CURRENT_DIR / 'napps' / '__init__.py'
-        if not os.path.islink(src):
-            src.symlink_to(dst)  # pylint: disable=no-member
+        symlink_if_different(src, dst)
 
 
-setup(name='kytos_mef_eline',
-      version='2.4',
+def symlink_if_different(path, target):
+    """Force symlink creation if it points anywhere else."""
+    # print(f"symlinking {path} to target: {target}...", end=" ")
+    if not path.exists():
+        # print(f"path doesn't exist. linking...")
+        path.symlink_to(target)
+    elif not path.samefile(target):
+        # print(f"path exists, but is different. removing and linking...")
+        # Exists but points to a different file, so let's replace it
+        path.unlink()
+        path.symlink_to(target)
+
+
+setup(name=f'kytos_{NAPP_NAME}',
+      version=NAPP_VERSION,
       description='Core NApps developed by Kytos Team',
-      url='http://github.com/kytos/mef_eline',
+      url='http://github.com/kytos/{NAPP_NAME}',
       author='Kytos Team',
       author_email='of-ng-dev@ncc.unesp.br',
       license='MIT',
       install_requires=['setuptools >= 36.0.1'],
+      setup_requires=['pytest-runner'],
+      tests_require=['pytest'],
       extras_require={
           'dev': [
               'coverage',
@@ -221,6 +291,7 @@ setup(name='kytos_mef_eline',
           'install': InstallMode,
           'lint': Linter,
           'egg_info': EggInfo,
+          'test': Test,
       },
       zip_safe=False,
       classifiers=[
