@@ -224,7 +224,7 @@ class DevelopMode(develop):
             shutil.rmtree(str(ENABLED_PATH), ignore_errors=True)
         else:
             self._create_folder_symlinks()
-            self._create_file_symlinks()
+            # self._create_file_symlinks()
             KytosInstall.enable_core_napps()
 
     @staticmethod
