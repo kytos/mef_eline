@@ -194,7 +194,7 @@ class EVCBase(GenericEntity):
         super().__init__()
 
         # required attributes
-        self._id = kwargs.get('id', uuid4().hex[16:])
+        self._id = kwargs.get('id', uuid4().hex[:16])
         self.uni_a = kwargs.get('uni_a')
         self.uni_z = kwargs.get('uni_z')
         self.name = kwargs.get('name')
