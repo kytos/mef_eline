@@ -17,6 +17,9 @@ from napps.kytos.mef_eline.scheduler import CircuitSchedule, Scheduler
 from napps.kytos.mef_eline.storehouse import StoreHouse
 
 
+DEPLOY_EVCS_INTERVAL = 60
+
+
 class Main(KytosNApp):
     """Main class of amlight/mef_eline NApp.
 
@@ -47,8 +50,13 @@ class Main(KytosNApp):
         # dictionary of EVCs by interface
         self._circuits_by_interface = {}
 
+        self.execute_as_loop(DEPLOY_EVCS_INTERVAL)
+
     def execute(self):
         """Execute once when the napp is running."""
+        for circuit in self.circuits.values():
+            if circuit.is_enabled() and not circuit.is_active():
+                circuit.deploy()
 
     def shutdown(self):
         """Execute when your napp is unloaded.
@@ -516,15 +524,13 @@ class Main(KytosNApp):
                     log.info(
                         f'Could not load EVC {circuit_id} because {exception}')
                     continue
-                log.info(f'Loading EVC {circuit_id}')
-                if evc.archived:
-                    continue
-                new_evc = self.circuits.setdefault(circuit_id, evc)
-                if new_evc == evc:
-                    if evc.is_enabled():
-                        log.info(f'Trying to deploy EVC {circuit_id}')
-                        evc.deploy()
-                    self.sched.add(evc)
+                evc.deactivate()
+                evc.current_path = Path([])
+                evc.sync()
+                self.circuits.setdefault(circuit_id, evc)
+                self.sched.add(evc)
+        log.info(f'Circuits {self.circuits}')
+
 
     def _evc_dict_with_instances(self, evc_dict):
         """Convert some dict values to instance of EVC classes.
