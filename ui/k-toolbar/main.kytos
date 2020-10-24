@@ -45,6 +45,7 @@
 </template>
 <script>
 module.exports = {
+/* All the javascript methods are optional */
   data(){
     return {
         circuit_name: "",
@@ -65,12 +66,12 @@ module.exports = {
      }
 
      if (this.tag_type_a != "" && this.tag_value_a != ""){
-        request.uni_a['tag'] = {tag_type: this.tag_type_a,
-                                tag_value: this.tag_value_a}
+        request.uni_a['tag'] = {tag_type: parseInt(this.tag_type_a),
+                                value: parseInt(this.tag_value_a)}
      }
      if (this.tag_type_z != "" && this.tag_value_z != ""){
-        request.uni_z['tag'] = {tag_type: this.tag_type_z,
-                                tag_value: this.tag_value_z}
+        request.uni_z['tag'] = {tag_type: parseInt(this.tag_type_z),
+                                value: parseInt(this.tag_value_z)}
      }
      $.ajax({
        url: this.$kytos_server_api + "kytos/mef_eline/v2/evc/",
@@ -79,10 +80,13 @@ module.exports = {
        dataType: "json",
        contentType: "application/json; charset=utf-8",
        success: function(data, textStatus){
-           console.log('Circuit with id '+data.circuit_id+" was creaded.")
+           console.log('Circuit with id '+data.circuit_id+" was created.")
+           alert('Circuit with id '+data.circuit_id+" was created.")
+
        },
        error: function(data){
-           console.log("Error ("+data.status+"): "+ data.responseJSON)
+           console.log("Error ("+data.status+"): "+ data.responseJSON.description)
+           alert("Error ("+data.status+"):"+ data.responseJSON.description)
        },
      })
     }
