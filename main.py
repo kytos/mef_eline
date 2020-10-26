@@ -12,12 +12,10 @@ from kytos.core.events import KytosEvent
 from kytos.core.helpers import listen_to
 from kytos.core.interface import TAG, UNI
 from kytos.core.link import Link
+from napps.kytos.mef_eline import settings
 from napps.kytos.mef_eline.models import EVC, DynamicPathManager, Path
 from napps.kytos.mef_eline.scheduler import CircuitSchedule, Scheduler
 from napps.kytos.mef_eline.storehouse import StoreHouse
-
-
-DEPLOY_EVCS_INTERVAL = 60
 
 
 class Main(KytosNApp):
@@ -50,7 +48,7 @@ class Main(KytosNApp):
         # dictionary of EVCs by interface
         self._circuits_by_interface = {}
 
-        self.execute_as_loop(DEPLOY_EVCS_INTERVAL)
+        self.execute_as_loop(settings.DEPLOY_EVCS_INTERVAL)
 
     def execute(self):
         """Execute once when the napp is running."""
@@ -529,8 +527,6 @@ class Main(KytosNApp):
                 evc.sync()
                 self.circuits.setdefault(circuit_id, evc)
                 self.sched.add(evc)
-        log.info(f'Circuits {self.circuits}')
-
 
     def _evc_dict_with_instances(self, evc_dict):
         """Convert some dict values to instance of EVC classes.
