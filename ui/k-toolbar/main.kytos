@@ -80,13 +80,15 @@ module.exports = {
        dataType: "json",
        contentType: "application/json; charset=utf-8",
        success: function(data, textStatus){
-           console.log('Circuit with id '+data.circuit_id+" was created.")
-           alert('Circuit with id '+data.circuit_id+" was created.")
+           msg = 'Circuit with id ' + data.circuit_id + " was created."
+           console.log(msg)
+           alert(msg)
 
        },
        error: function(data){
-           console.log("Error ("+data.status+"): "+ data.responseJSON.description)
-           alert("Error ("+data.status+"):"+ data.responseJSON.description)
+           msg = "Error (" + data.status + "): " + data.responseJSON.description
+           console.log(msg)
+           alert(msg)
        },
      })
     }
