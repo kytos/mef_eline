@@ -453,7 +453,8 @@ class EVCDeploy(EVCBase):
         if success:
             return True
 
-        if self.dynamic_backup_path:
+        if self.dynamic_backup_path or \
+           self.uni_a.interface.switch == self.uni_z.interface.switch:
             return self.deploy_to_path()
 
         return False
