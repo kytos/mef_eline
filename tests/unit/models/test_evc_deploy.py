@@ -472,6 +472,42 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual(sync_mock.call_count, 1)
         self.assertFalse(deployed)
 
+    @patch('napps.kytos.mef_eline.models.EVC.deploy_to_path')
+    @patch('napps.kytos.mef_eline.models.EVC.discover_new_paths')
+    def test_deploy_to_backup_path1(self, discover_new_paths_mocked,
+                                    deploy_to_path_mocked):
+        """Test deployment when dynamic_backup_path is False in same switch"""
+        uni_a = get_uni_mocked(interface_port=2, tag_value=82,
+                               is_valid=True)
+        uni_z = get_uni_mocked(interface_port=3, tag_value=83,
+                               is_valid=True)
+
+        switch = Mock(spec=Switch)
+        uni_a.interface.switch = switch
+        uni_z.interface.switch = switch
+
+        attributes = {
+            "controller": get_controller_mock(),
+            "name": "custom_name",
+            "uni_a": uni_a,
+            "uni_z": uni_z,
+            "enabled": True,
+            "dynamic_backup_path": False
+        }
+
+        evc = EVC(**attributes)
+        discover_new_paths_mocked.return_value = []
+        deploy_to_path_mocked.return_value = True
+
+        # storehouse initialization mock
+        evc._storehouse.box = Mock()  # pylint: disable=protected-access
+        evc._storehouse.box.data = {}  # pylint: disable=protected-access
+
+        deployed = evc.deploy_to_backup_path()
+
+        deploy_to_path_mocked.assert_called_once_with()
+        self.assertEqual(deployed, True)
+
     @patch('requests.post')
     @patch('napps.kytos.mef_eline.models.log')
     @patch('napps.kytos.mef_eline.models.Path.choose_vlans')
@@ -499,7 +535,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
             "uni_a": uni_a,
             "uni_z": uni_z,
             "enabled": True,
-            "dynamic_backup_path": True
+            "dynamic_backup_path": False
         }
 
         dynamic_backup_path = Path([
