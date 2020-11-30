@@ -310,12 +310,19 @@ class TestMain(TestCase):
     @patch('napps.kytos.mef_eline.models.EVC._validate')
     def test_create_a_circuit_case_1(self, *args):
         """Test create a new circuit."""
+        # pylint: disable=too-many-locals
         (validate_mock, evc_as_dict_mock, save_evc_mock,
          uni_from_dict_mock, sched_add_mock, storehouse_data_mock) = args
 
         validate_mock.return_value = True
         save_evc_mock.return_value = True
-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z']
+        uni1 = create_autospec(UNI)
+        uni2 = create_autospec(UNI)
+        uni1.interface = create_autospec(Interface)
+        uni2.interface = create_autospec(Interface)
+        uni1.interface.switch = '00:00:00:00:00:00:00:01'
+        uni2.interface.switch = '00:00:00:00:00:00:00:02'
+        uni_from_dict_mock.side_effect = [uni1, uni2]
         evc_as_dict_mock.return_value = {}
         sched_add_mock.return_value = True
         storehouse_data_mock.return_value = {}
@@ -358,8 +365,8 @@ class TestMain(TestCase):
         validate_mock.assert_called_once()
         validate_mock.assert_called_with(frequency='* * * * *',
                                          name='my evc1',
-                                         uni_a='uni_a',
-                                         uni_z='uni_z')
+                                         uni_a=uni1,
+                                         uni_z=uni2)
         # verify save method is called
         save_evc_mock.assert_called_once()
 
@@ -424,11 +431,16 @@ class TestMain(TestCase):
         validate_mock.return_value = True
         save_evc_mock.return_value = True
         sched_add_mock.return_value = True
-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z', 'uni_a', 'uni_z']
-        payload1 = {'name': 'circuit_1'}
+        uni1 = create_autospec(UNI)
+        uni2 = create_autospec(UNI)
+        uni1.interface = create_autospec(Interface)
+        uni2.interface = create_autospec(Interface)
+        uni1.interface.switch = '00:00:00:00:00:00:00:01'
+        uni2.interface.switch = '00:00:00:00:00:00:00:02'
+        uni_from_dict_mock.side_effect = [uni1, uni2, uni1, uni2]
 
         api = self.get_app_test_client(self.napp)
-        payload2 = {
+        payload = {
             "name": "my evc1",
             "uni_a": {
                 "interface_id": "00:00:00:00:00:00:00:01:1",
@@ -446,20 +458,14 @@ class TestMain(TestCase):
             }
         }
 
-        evc_as_dict_mock.return_value = payload1
+        evc_as_dict_mock.return_value = payload
         response = api.post(f'{self.server_name_url}/v2/evc/',
-                            data=json.dumps(payload1),
-                            content_type='application/json')
-        self.assertEqual(201, response.status_code)
-
-        evc_as_dict_mock.return_value = payload2
-        response = api.post(f'{self.server_name_url}/v2/evc/',
-                            data=json.dumps(payload2),
+                            data=json.dumps(payload),
                             content_type='application/json')
         self.assertEqual(201, response.status_code)
 
         response = api.post(f'{self.server_name_url}/v2/evc/',
-                            data=json.dumps(payload2),
+                            data=json.dumps(payload),
                             content_type='application/json')
         current_data = json.loads(response.data)
         expected_data = 'The EVC already exists.'
@@ -1210,13 +1216,20 @@ class TestMain(TestCase):
     @patch('napps.kytos.mef_eline.main.EVC.as_dict')
     def test_update_circuit_invalid_json(self, *args):
         """Test update a circuit circuit."""
+        # pylint: disable=too-many-locals
         (evc_as_dict_mock, validate_mock, save_evc_mock,
          uni_from_dict_mock, sched_add_mock) = args
 
         validate_mock.return_value = True
         save_evc_mock.return_value = True
         sched_add_mock.return_value = True
-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z', 'uni_a', 'uni_z']
+        uni1 = create_autospec(UNI)
+        uni2 = create_autospec(UNI)
+        uni1.interface = create_autospec(Interface)
+        uni2.interface = create_autospec(Interface)
+        uni1.interface.switch = '00:00:00:00:00:00:00:01'
+        uni2.interface.switch = '00:00:00:00:00:00:00:02'
+        uni_from_dict_mock.side_effect = [uni1, uni2, uni1, uni2]
 
         api = self.get_app_test_client(self.napp)
         payload1 = {
