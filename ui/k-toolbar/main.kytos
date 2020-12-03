@@ -40,12 +40,17 @@
                      icon="gear" :on_click="request_circuit">
                      </k-button>
          </k-accordion-item>
+
+         <k-accordion-item title="List EVCs">
+            <k-button tooltip="List installed EVC" title="List installed EVC"
+                     icon="plug" :on_click="showInfoPanel">
+                     </k-button>
+         </k-accordion-item>
       </k-accordion>
     </k-toolbar-item>
 </template>
 <script>
 module.exports = {
-/* All the javascript methods are optional */
   data(){
     return {
         circuit_name: "",
@@ -58,13 +63,24 @@ module.exports = {
     }
   },
   methods: {
+    showInfoPanel()  {
+            var content = {
+                "component": 'kytos-mef_eline-k-info-panel-list_connections',
+//                "component": 'list_connections',
+                "content": {},
+                "icon": "desktop",
+                "title": "View Connections",
+                "subtitle": "by kytos/mef_eline"
+            }
+            this.$kytos.$emit("showInfoPanel", content)
+        },
+
     request_circuit () {
      var request = {
         "name" : this.circuit_name,
         "uni_a": {"interface_id": this.endpoint_a},
         "uni_z": {"interface_id": this.endpoint_z}
      }
-
      if (this.tag_type_a != "" && this.tag_value_a != ""){
         request.uni_a['tag'] = {tag_type: parseInt(this.tag_type_a),
                                 value: parseInt(this.tag_value_a)}
@@ -73,24 +89,98 @@ module.exports = {
         request.uni_z['tag'] = {tag_type: parseInt(this.tag_type_z),
                                 value: parseInt(this.tag_value_z)}
      }
-     $.ajax({
-       url: this.$kytos_server_api + "kytos/mef_eline/v2/evc/",
-       type:"POST",
-       data: JSON.stringify(request),
-       dataType: "json",
-       contentType: "application/json; charset=utf-8",
-       success: function(data, textStatus){
-           msg = 'Circuit with id ' + data.circuit_id + " was created."
-           console.log(msg)
-           alert(msg)
+     //variable to check if there is no endpoint in use
+     var endpointsInUSe = false;
+     var connectionCreated = false;
 
-       },
-       error: function(data){
-           msg = "Error (" + data.status + "): " + data.responseJSON.description
-           console.log(msg)
-           alert(msg)
-       },
+     //used to notify the user of changes that were made
+
+     let notification = {
+        icon:'gear'
+     };
+
+     $.ajax(
+     //GET Request to check availability
+     {
+        url: this.$kytos_server_api + "kytos/mef_eline/v2/evc/",
+        type:"GET",
+        data: JSON.stringify(),
+        dataType: "json",
+        contentType: "application/json; charset=utf-8",
+        success: function(data, textStatus){
+
+            $.each(data, function(i , evc){
+                //is request endpoint A port in used
+                var request_port_a_InUse1 = (request.uni_a.interface_id == evc.uni_a.interface_id && request.uni_a.tag.value == evc.uni_a.tag.value);
+                var request_port_a_InUse2 = (request.uni_a.interface_id == evc.uni_z.interface_id && request.uni_a.tag.value == evc.uni_z.tag.value);
+
+                //is request endpoint Z port in used
+                var request_port_z_InUse1 = (request.uni_z.interface_id == evc.uni_a.interface_id && request.uni_z.tag.value == evc.uni_a.tag.value);
+                var request_port_z_InUse2 = (request.uni_z.interface_id == evc.uni_z.interface_id && request.uni_z.tag.value == evc.uni_z.tag.value);
+
+                // if end point A in use, show alert
+                if( request_port_a_InUse1 || request_port_a_InUse2)
+                {
+                    endpointsInUSe= true;
+                    msg = request.uni_a.interface_id + " Tag: " + request.uni_a.tag.value  + " in use";
+
+                    notification.title = "End Point in use"
+                    notification.description = msg;
+                }
+                // if end point Z in use, AND end point A not in use
+                if((request_port_z_InUse1 || request_port_z_InUse2) && endpointsInUSe === false)
+                {
+                    endpointsInUSe= true;
+                    msg = request.uni_z.interface_id  + " Tag: " + request.uni_z.tag.value + " in use";
+
+                    notification.title = "End Point in use"
+                    notification.description = msg;
+                }
+            });
+
+            //if end points are not in use, print message
+            if(!endpointsInUSe)
+            {
+                console.log("The input end points are not in use, preparing to create EVC")
+
+                //call back POST request to create EVC
+                {
+                    $.ajax({
+                       url: this.url,
+                       type:"POST",
+                       data: JSON.stringify(request),
+                       dataType: "json",
+                       contentType: "application/json; charset=utf-8",
+                       success: function(data, textStatus){
+
+                           msg = 'Circuit with id ' + data.circuit_id + " was created."
+                           notification.title = "Circuit Created"
+                           notification.description = msg;
+                       },
+                       error: function(data , kytos){
+
+                           msg = "Error (" + data.status + "): " + data.responseJSON.description
+                           notification.title = "Circuit Not created"
+                           notification.description = msg;
+
+                       },
+                     })
+                }//END of POST request
+
+            }
+            else
+            {
+                console.log(notification)
+                console.log("GET REQUEST ERROR");
+            }
+        },
+        error: function(data){
+//            console.log("GET request Error ("+data+"):
+        }
      })
+
+     console.log(notification)
+    this.$kytos.$emit("setNotification" , notification);
     }
   }
 }
