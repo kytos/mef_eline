@@ -323,6 +323,13 @@ class EVCBase(GenericEntity):
                 return False
         return True
 
+    def share_uni(self, other):
+        """Check if two EVCs share an UNI."""
+        if other.uni_a in (self.uni_a, self.uni_z) or \
+           other.uni_z in (self.uni_a, self.uni_z):
+            return True
+        return False
+
     def as_dict(self):
         """Return a dictionary representing an EVC object."""
         evc_dict = {"id": self.id, "name": self.name,
