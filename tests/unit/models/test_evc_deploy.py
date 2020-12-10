@@ -157,7 +157,8 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         in_vlan = 10
 
         # pylint: disable=protected-access
-        flow_mod = evc._prepare_pop_flow(interface_a, interface_z, in_vlan)
+        flow_mod = evc._prepare_pop_flow(interface_a, interface_z,
+                                         None, in_vlan)
 
         expected_flow_mod = {
             'match': {'in_port': interface_a.port_number, 'dl_vlan': in_vlan},
@@ -185,43 +186,29 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
         out_vlan_a = 20
 
         for in_vlan_a in (10, None):
-            for in_vlan_z in (3, None):
-                with self.subTest(in_vlan_a=in_vlan_a, in_vlan_z=in_vlan_z):
-                    # pylint: disable=protected-access
-                    flow_mod = evc._prepare_push_flow(interface_a, interface_z,
-                                                      in_vlan_a, out_vlan_a,
-                                                      in_vlan_z)
+            with self.subTest(in_vlan_a=in_vlan_a):
+                # pylint: disable=protected-access
+                flow_mod = evc._prepare_push_flow(interface_a, interface_z,
+                                                  in_vlan_a, out_vlan_a)
 
-                    expected_flow_mod = {
-                        'match': {'in_port': interface_a.port_number},
-                        'cookie': evc.get_cookie(),
-                        'actions': [
-                            {'action_type': 'push_vlan', 'tag_type': 's'},
-                            {'action_type': 'set_vlan', 'vlan_id': out_vlan_a},
-                            {
-                                'action_type': 'output',
-                                'port': interface_z.port_number
-                            }
-                        ]
-                    }
-                    if in_vlan_a and in_vlan_z:
-                        expected_flow_mod['match']['dl_vlan'] = in_vlan_a
-                        expected_flow_mod['actions'].insert(0, {
-                            'action_type': 'set_vlan', 'vlan_id': in_vlan_z
-                        })
-                    elif in_vlan_a:
-                        expected_flow_mod['match']['dl_vlan'] = in_vlan_a
-                        expected_flow_mod['actions'].insert(0, {
-                            'action_type': 'pop_vlan'
-                        })
-                    elif in_vlan_z:
-                        expected_flow_mod['actions'].insert(0, {
-                            'action_type': 'set_vlan', 'vlan_id': in_vlan_z
-                        })
-                        expected_flow_mod['actions'].insert(0, {
-                            'action_type': 'push_vlan', 'tag_type': 'c'
-                        })
-                    self.assertEqual(expected_flow_mod, flow_mod)
+                expected_flow_mod = {
+                    'match': {'in_port': interface_a.port_number},
+                    'cookie': evc.get_cookie(),
+                    'actions': [
+                        {'action_type': 'push_vlan', 'tag_type': 's'},
+                        {'action_type': 'set_vlan', 'vlan_id': out_vlan_a},
+                        {
+                            'action_type': 'output',
+                            'port': interface_z.port_number
+                        }
+                    ]
+                }
+                if in_vlan_a:
+                    expected_flow_mod['match']['dl_vlan'] = in_vlan_a
+                    expected_flow_mod['actions'].insert(0, {
+                        'action_type': 'pop_vlan'
+                    })
+                self.assertEqual(expected_flow_mod, flow_mod)
 
     @staticmethod
     @patch('napps.kytos.mef_eline.models.EVC._send_flow_mods')
@@ -257,7 +244,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
                        'dl_vlan': uni_a.user_tag.value},
              'cookie': evc.get_cookie(),
              'actions': [
-                {'action_type': 'set_vlan', 'vlan_id': uni_z.user_tag.value},
+                {'action_type': 'pop_vlan'},
                 {'action_type': 'push_vlan', 'tag_type': 's'},
                 {'action_type': 'set_vlan',
                  'vlan_id': evc.primary_links[0].get_metadata('s_vlan').value},
@@ -271,10 +258,13 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
              'cookie': evc.get_cookie(),
              'actions': [
                 {'action_type': 'pop_vlan'},
+                {'action_type': 'push_vlan', 'tag_type': 'c'},
+                {'action_type': 'set_vlan', 'vlan_id': uni_a.user_tag.value},
                 {'action_type': 'output', 'port': uni_a.interface.port_number}
              ]
              }
         ]
+
         send_flow_mods_mock.assert_any_call(uni_a.interface.switch,
                                             expected_flow_mod_a)
 
@@ -283,7 +273,7 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
                        'dl_vlan': uni_z.user_tag.value},
              'cookie': evc.get_cookie(),
              'actions': [
-                {'action_type': 'set_vlan', 'vlan_id': uni_a.user_tag.value},
+                {'action_type': 'pop_vlan'},
                 {'action_type': 'push_vlan', 'tag_type': 's'},
                 {'action_type': 'set_vlan',
                  'vlan_id': evc.primary_links[-1].get_metadata('s_vlan').value
@@ -299,6 +289,8 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
              'cookie': evc.get_cookie(),
              'actions': [
                 {'action_type': 'pop_vlan'},
+                {'action_type': 'push_vlan', 'tag_type': 'c'},
+                {'action_type': 'set_vlan', 'vlan_id': uni_z.user_tag.value},
                 {'action_type': 'output', 'port': uni_z.interface.port_number}
               ]
              }
