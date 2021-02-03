@@ -202,6 +202,7 @@ class EVCBase(GenericEntity):
         # optional attributes
         self.start_date = get_time(kwargs.get('start_date')) or now()
         self.end_date = get_time(kwargs.get('end_date')) or None
+        self.queue_id = kwargs.get('queue_id', None)
 
         self.bandwidth = kwargs.get('bandwidth', 0)
         self.primary_links = Path(kwargs.get('primary_links', []))
@@ -338,6 +339,7 @@ class EVCBase(GenericEntity):
         if isinstance(self.end_date, datetime):
             evc_dict["end_date"] = self.end_date.strftime(time_fmt)
 
+        evc_dict['queue_id'] = self.queue_id
         evc_dict['bandwidth'] = self.bandwidth
         evc_dict['primary_links'] = self.primary_links.as_dict()
         evc_dict['backup_links'] = self.backup_links.as_dict()

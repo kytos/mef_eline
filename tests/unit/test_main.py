@@ -107,7 +107,8 @@ class TestMain(TestCase):
             "circuit_scheduler": [{
                 "frequency": "* * * * *",
                 "action": "create"
-            }]
+            }],
+            "queue_id": 5
         }
         # pylint: disable=protected-access
         evc_response = self.napp._evc_from_dict(payload)
@@ -116,6 +117,7 @@ class TestMain(TestCase):
         self.assertIsNotNone(evc_response.uni_z)
         self.assertIsNotNone(evc_response.circuit_scheduler)
         self.assertIsNotNone(evc_response.name)
+        self.assertIsNotNone(evc_response.queue_id)
 
     @patch('napps.kytos.mef_eline.main.Main._uni_from_dict')
     @patch('napps.kytos.mef_eline.models.EVCBase._validate')
