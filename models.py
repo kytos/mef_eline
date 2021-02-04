@@ -615,9 +615,11 @@ class EVCDeploy(EVCBase):
         vlan_z = self.uni_z.user_tag.value if self.uni_z.user_tag else None
 
         flow_mod_az = self._prepare_flow_mod(self.uni_a.interface,
-                                             self.uni_z.interface)
+                                             self.uni_z.interface, 
+                                             self.queue_id)
         flow_mod_za = self._prepare_flow_mod(self.uni_z.interface,
-                                             self.uni_a.interface)
+                                             self.uni_a.interface,
+                                             self.queue_id)
 
         if vlan_a and vlan_z:
             flow_mod_az['match']['dl_vlan'] = vlan_a
@@ -649,12 +651,14 @@ class EVCDeploy(EVCBase):
             # Flow for one direction
             flows.append(self._prepare_nni_flow(incoming.endpoint_b,
                                                 outcoming.endpoint_a,
-                                                in_vlan, out_vlan))
+                                                in_vlan, out_vlan,
+                                                queue_id=self.queue_id))
 
             # Flow for the other direction
             flows.append(self._prepare_nni_flow(outcoming.endpoint_a,
                                                 incoming.endpoint_b,
-                                                out_vlan, in_vlan))
+                                                out_vlan, in_vlan,
+                                                queue_id=self.queue_id))
             self._send_flow_mods(incoming.endpoint_b.switch, flows)
 
     def _install_uni_flows(self, path=None):
@@ -676,12 +680,14 @@ class EVCDeploy(EVCBase):
         # Flow for one direction, pushing the service tag
         push_flow = self._prepare_push_flow(self.uni_a.interface,
                                             path[0].endpoint_a,
-                                            in_vlan_a, out_vlan_a, in_vlan_z)
+                                            in_vlan_a, out_vlan_a, 
+                                            in_vlan_z, queue_id=self.queue_id)
         flows_a.append(push_flow)
 
         # Flow for the other direction, popping the service tag
         pop_flow = self._prepare_pop_flow(path[0].endpoint_a,
-                                          self.uni_a.interface, out_vlan_a)
+                                          self.uni_a.interface, 
+                                          out_vlan_a, queue_id=self.queue_id)
         flows_a.append(pop_flow)
 
         self._send_flow_mods(self.uni_a.interface.switch, flows_a)
@@ -692,12 +698,14 @@ class EVCDeploy(EVCBase):
         # Flow for one direction, pushing the service tag
         push_flow = self._prepare_push_flow(self.uni_z.interface,
                                             path[-1].endpoint_b,
-                                            in_vlan_z, out_vlan_z, in_vlan_a)
+                                            in_vlan_z, out_vlan_z, 
+                                            in_vlan_a, queue_id=self.queue_id)
         flows_z.append(push_flow)
 
         # Flow for the other direction, popping the service tag
         pop_flow = self._prepare_pop_flow(path[-1].endpoint_b,
-                                          self.uni_z.interface, out_vlan_z)
+                                          self.uni_z.interface, 
+                                          out_vlan_z, queue_id=self.queue_id)
         flows_z.append(pop_flow)
 
         self._send_flow_mods(self.uni_z.interface.switch, flows_z)
@@ -721,21 +729,26 @@ class EVCDeploy(EVCBase):
         """Return the cookie integer from evc id."""
         return int(self.id, 16)
 
-    def _prepare_flow_mod(self, in_interface, out_interface):
+    def _prepare_flow_mod(self, in_interface, out_interface, queue_id=None):
         """Prepare a common flow mod."""
-        default_action = {"action_type": "output",
-                          "port": out_interface.port_number}
+        default_actions = [{"action_type": "output",
+                            "port": out_interface.port_number}]
+        if queue_id:
+            default_actions.append(
+                {"action_type": "set_queue", "queue_id": queue_id}
+            )          
 
         flow_mod = {"match": {"in_port": in_interface.port_number},
                     "cookie": self.get_cookie(),
-                    "actions": [default_action]}
+                    "actions": default_actions}
 
         return flow_mod
 
-    def _prepare_nni_flow(self,
-                          in_interface, out_interface, in_vlan, out_vlan):
+    def _prepare_nni_flow(self, in_interface, out_interface, in_vlan, 
+                          out_vlan, queue_id=None):
         """Create NNI flows."""
-        flow_mod = self._prepare_flow_mod(in_interface, out_interface)
+        flow_mod = self._prepare_flow_mod(in_interface, out_interface, 
+                                          queue_id)
         flow_mod['match']['dl_vlan'] = in_vlan
 
         new_action = {"action_type": "set_vlan",
@@ -744,7 +757,7 @@ class EVCDeploy(EVCBase):
 
         return flow_mod
 
-    def _prepare_push_flow(self, *args):
+    def _prepare_push_flow(self, *args, queue_id=None):
         """Prepare push flow.
 
         Arguments:
@@ -761,7 +774,8 @@ class EVCDeploy(EVCBase):
         # assign all arguments
         in_interface, out_interface, in_vlan, out_vlan, new_in_vlan = args
 
-        flow_mod = self._prepare_flow_mod(in_interface, out_interface)
+        flow_mod = self._prepare_flow_mod(in_interface, out_interface, 
+                                          queue_id)
 
         # the service tag must be always pushed
         new_action = {"action_type": "set_vlan", "vlan_id": out_vlan}
@@ -789,9 +803,11 @@ class EVCDeploy(EVCBase):
             flow_mod["actions"].insert(0, new_action)
         return flow_mod
 
-    def _prepare_pop_flow(self, in_interface, out_interface, out_vlan):
+    def _prepare_pop_flow(self, in_interface, out_interface, out_vlan,
+                          queue_id=None):
         """Prepare pop flow."""
-        flow_mod = self._prepare_flow_mod(in_interface, out_interface)
+        flow_mod = self._prepare_flow_mod(in_interface, out_interface, 
+                                          queue_id)
         flow_mod['match']['dl_vlan'] = out_vlan
         new_action = {"action_type": "pop_vlan"}
         flow_mod["actions"].insert(0, new_action)

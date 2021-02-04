@@ -397,7 +397,8 @@ class TestEVC(TestCase):  # pylint: disable=too-many-public-methods
             "name": "custom_name",
             "uni_a": uni_a,
             "uni_z": uni_z,
-            "primary_links": primary_links
+            "primary_links": primary_links,
+            "queue_id": 5
         }
         # Setup path to deploy
         path = Path()
