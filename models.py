@@ -599,6 +599,7 @@ class EVCDeploy(EVCBase):
             self._install_direct_uni_flows()
             use_path = Path()
         else:
+            log.warn(f"{self} was not deployed. No available path was found.")
             return False
         self.activate()
         self.current_path = use_path
