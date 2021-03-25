@@ -689,7 +689,7 @@ class EVCDeploy(EVCBase):
         # Flow for the other direction, popping the service tag
         pop_flow = self._prepare_pop_flow(path[0].endpoint_a,
                                           self.uni_a.interface,
-                                          in_vlan_a, out_vlan_a, 
+                                          in_vlan_a, out_vlan_a,
                                           queue_id=self.queue_id)
         flows_a.append(pop_flow)
 
@@ -708,7 +708,7 @@ class EVCDeploy(EVCBase):
         # Flow for the other direction, popping the service tag
         pop_flow = self._prepare_pop_flow(path[-1].endpoint_b,
                                           self.uni_z.interface,
-                                          in_vlan_z, out_vlan_z, 
+                                          in_vlan_z, out_vlan_z,
                                           queue_id=self.queue_id)
         flows_z.append(pop_flow)
 
@@ -796,6 +796,7 @@ class EVCDeploy(EVCBase):
 
     def _prepare_pop_flow(self, in_interface, out_interface, in_vlan,
                           out_vlan, queue_id=None):
+        # pylint: disable=too-many-arguments
         """Prepare pop flow."""
         flow_mod = self._prepare_flow_mod(in_interface, out_interface,
                                           queue_id)
