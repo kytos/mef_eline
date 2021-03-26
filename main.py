@@ -538,7 +538,7 @@ class Main(KytosNApp):
             return
         if command != 'add':
             return
-        evc_id = hex(flow.cookie).lstrip('0x').rstrip('L')
+        evc_id = f'{flow.cookie:x}'
         evc = self.circuits.get(evc_id)
         if evc:
             evc.remove_current_flows()
