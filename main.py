@@ -534,8 +534,6 @@ class Main(KytosNApp):
         """Handle flow mod errors related to an EVC."""
         flow = event.content['flow']
         command = event.content.get('error_command')
-        if command is None:
-            return
         if command != 'add':
             return
         evc_id = f'{flow.cookie:x}'
