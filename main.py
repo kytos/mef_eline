@@ -462,7 +462,7 @@ class Main(KytosNApp):
 
         """
         for circuit in self.circuits.values():
-            if not circuit.archived and circuit.share_uni(evc):
+            if not circuit.archived and circuit.shares_uni(evc):
                 return True
         return False
 
