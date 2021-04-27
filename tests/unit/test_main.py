@@ -1397,6 +1397,7 @@ class TestMain(TestCase):
         """Test handle_link_up method."""
         evc_mock = create_autospec(EVC)
         evc_mock.is_enabled = MagicMock(side_effect=[True, False, True])
+        evc_mock.lock = MagicMock()
         type(evc_mock).archived = \
             PropertyMock(side_effect=[True, False, False])
         evcs = [evc_mock, evc_mock, evc_mock]
@@ -1410,6 +1411,7 @@ class TestMain(TestCase):
         evc_mock = create_autospec(EVC)
         evc_mock.is_affected_by_link = \
             MagicMock(side_effect=[True, False, True])
+        evc_mock.lock = MagicMock()
         evcs = [evc_mock, evc_mock, evc_mock]
         event = KytosEvent(name='test', content={'link': 'abc'})
         self.napp.circuits = dict(zip(['1', '2', '3'], evcs))
