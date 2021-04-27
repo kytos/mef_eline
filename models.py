@@ -1,5 +1,6 @@
 """Classes used in the main application."""
 from datetime import datetime
+from threading import Lock
 from uuid import uuid4
 
 import requests
@@ -220,6 +221,8 @@ class EVCBase(GenericEntity):
         self.current_links_cache = set()
         self.primary_links_cache = set()
         self.backup_links_cache = set()
+
+        self.lock = Lock()
 
         self.archived = kwargs.get('archived', False)
 

@@ -472,16 +472,18 @@ class Main(KytosNApp):
         log.debug("Event handle_link_up %s", event)
         for evc in self.circuits.values():
             if evc.is_enabled() and not evc.archived:
-                evc.handle_link_up(event.content['link'])
+                with evc.lock:
+                    evc.handle_link_up(event.content['link'])
 
     @listen_to('kytos/topology.link_down')
     def handle_link_down(self, event):
         """Change circuit when link is down or under_mantenance."""
         log.debug("Event handle_link_down %s", event)
         for evc in self.circuits.values():
-            if evc.is_affected_by_link(event.content['link']):
-                log.info('handling evc %s' % evc)
-                evc.handle_link_down()
+            with evc.lock:
+                if evc.is_affected_by_link(event.content['link']):
+                    log.info('handling evc %s' % evc)
+                    evc.handle_link_down()
 
     def load_circuits_by_interface(self, circuits):
         """Load circuits in storehouse for in-memory dictionary."""
