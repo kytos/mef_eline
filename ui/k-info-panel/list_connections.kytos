@@ -1,5 +1,5 @@
 <template>
-    <k-table v-if="this.emptyTable" title="List of EVCs"
+    <k-table v-if="this.rows.length" title="List of EVCs"
         :headers="this.headers"
         :rows="this.rows">
     </k-table>

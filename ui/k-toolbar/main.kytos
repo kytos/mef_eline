@@ -94,6 +94,8 @@ module.exports = {
     request_circuit () {
         var request = {
             "name" : this.circuit_name,
+            "dynamic_backup_path": true,
+            "enabled": true,
             "uni_a": {"interface_id": this.endpoint_a},
             "uni_z": {"interface_id": this.endpoint_z}
         }
@@ -108,7 +110,7 @@ module.exports = {
         }
         
         let circuit_request = $.ajax({
-                                url: this.url,
+                                url: this.$kytos_server_api + "kytos/mef_eline/v2/evc/",
                                 type:"POST",
                                 data: JSON.stringify(request),
                                 dataType: "json",
