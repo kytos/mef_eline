@@ -482,7 +482,7 @@ class Main(KytosNApp):
         for evc in self.circuits.values():
             with evc.lock:
                 if evc.is_affected_by_link(event.content['link']):
-                    log.info('handling evc %s' % evc)
+                    log.debug(f'Handling evc {evc.id} on link down')
                     evc.handle_link_down()
 
     def load_circuits_by_interface(self, circuits):
