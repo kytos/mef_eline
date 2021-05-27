@@ -3,6 +3,15 @@ Changelog
 #########
 All notable changes to the MEF_ELine NApp will be documented in this file.
 
+[2.5.1] - 2021-05-28
+******************
+
+Fixed
+=====
+- Fixed UI to list and create EVCs
+- Added locks to avoid race conditions
+
+
 [2.5] - 2021-03-31
 ******************
 

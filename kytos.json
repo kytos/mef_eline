@@ -3,7 +3,7 @@
   "username": "kytos",
   "name": "mef_eline",
   "description": "NApp to provision circuits from user request",
-  "version": "2.5",
+  "version": "2.5.1",
   "napp_dependencies": ["kytos/flow_manager", "kytos/pathfinder", "kytos/storehouse"],
   "license": "MIT",
   "tags": [],
