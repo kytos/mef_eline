@@ -4,7 +4,7 @@ Changelog
 All notable changes to the MEF_ELine NApp will be documented in this file.
 
 [2.5.1] - 2021-05-28
-******************
+********************
 
 Fixed
 =====
