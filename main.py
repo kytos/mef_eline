@@ -2,6 +2,8 @@
 
 NApp to provision circuits from user request.
 """
+from threading import Lock
+
 from flask import jsonify, request
 from werkzeug.exceptions import (BadRequest, Conflict, Forbidden,
                                  MethodNotAllowed, NotFound,
@@ -48,11 +50,13 @@ class Main(KytosNApp):
         # dictionary of EVCs by interface
         self._circuits_by_interface = {}
 
+        self._lock = Lock()
+
         self.execute_as_loop(settings.DEPLOY_EVCS_INTERVAL)
 
     def execute(self):
         """Execute once when the napp is running."""
-        for circuit in self.circuits.values():
+        for circuit in tuple(self.circuits.values()):
             if circuit.is_enabled() and not circuit.is_active():
                 circuit.deploy()
 
@@ -461,7 +465,7 @@ class Main(KytosNApp):
             boolean: True if the circuit is duplicated, otherwise False.
 
         """
-        for circuit in self.circuits.values():
+        for circuit in tuple(self.circuits.values()):
             if not circuit.archived and circuit.shares_uni(evc):
                 return True
         return False
@@ -488,6 +492,8 @@ class Main(KytosNApp):
     def load_circuits_by_interface(self, circuits):
         """Load circuits in storehouse for in-memory dictionary."""
         for circuit_id, circuit in circuits.items():
+            if circuit['archived'] is True:
+                continue
             intf_a = circuit['uni_a']['interface_id']
             self.add_to_dict_of_sets(intf_a, circuit_id)
             intf_z = circuit['uni_z']['interface_id']
@@ -508,28 +514,31 @@ class Main(KytosNApp):
     @listen_to('kytos/topology.port.created')
     def load_evcs(self, event):
         """Try to load the unloaded EVCs from storehouse."""
-        log.debug("Event load_evcs %s", event)
-        circuits = self.storehouse.get_data()
-        if not self._circuits_by_interface:
-            self.load_circuits_by_interface(circuits)
+        with self._lock:
+            log.debug("Event load_evcs %s", event)
+            circuits = self.storehouse.get_data()
+            if not self._circuits_by_interface:
+                self.load_circuits_by_interface(circuits)
 
-        interface_id = '{}:{}'.format(event.content['switch'],
-                                      event.content['port'])
+            interface_id = '{}:{}'.format(event.content['switch'],
+                                          event.content['port'])
 
-        for circuit_id in self._circuits_by_interface.get(interface_id, []):
-            if circuit_id in circuits and circuit_id not in self.circuits:
-                try:
-                    evc = self._evc_from_dict(circuits[circuit_id])
-                except ValueError as exception:
-                    log.info(
-                        f'Could not load EVC {circuit_id} because {exception}')
-                    continue
+            for circuit_id in self._circuits_by_interface.get(interface_id,
+                                                              []):
+                if circuit_id in circuits and circuit_id not in self.circuits:
+                    try:
+                        evc = self._evc_from_dict(circuits[circuit_id])
+                    except ValueError as exception:
+                        log.error(
+                            f'Could not load EVC {circuit_id} '
+                            f'because {exception}')
+                        continue
 
-                evc.deactivate()
-                evc.current_path = Path([])
-                evc.sync()
-                self.circuits.setdefault(circuit_id, evc)
-                self.sched.add(evc)
+                    evc.deactivate()
+                    evc.current_path = Path([])
+                    evc.sync()
+                    self.circuits.setdefault(circuit_id, evc)
+                    self.sched.add(evc)
 
     @listen_to('kytos/flow_manager.flow.error')
     def handle_flow_mod_error(self, event):

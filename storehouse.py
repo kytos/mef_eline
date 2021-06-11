@@ -22,7 +22,8 @@ class StoreHouse:
         """Create a storehouse instance."""
         self.controller = controller
         self.namespace = 'kytos.mef_eline.circuits'
-        self._lock = threading.Lock()
+        if '_lock' not in self.__dict__:
+            self._lock = threading.Lock()
         if 'box' not in self.__dict__:
             self.box = None
         self.list_stored_boxes()
